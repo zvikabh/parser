@@ -1,5 +1,6 @@
 """Lexical analyzer. Parses an input string into tokens."""
 
+import abc
 import ast
 import dataclasses
 import re
@@ -11,9 +12,26 @@ class LexerError(Exception):
 
 
 @dataclasses.dataclass(frozen=True)
-class Token:
+class TokenMatcher:
+    """Matches specific token types."""
     id: str
     regexp: re.Pattern
+
+
+@dataclasses.dataclass(frozen=True)
+class Token:
+    """A specific occurrence of a token.
+
+    Attributes:
+        token_id: The id of the TokenMatcher which matched this token.
+        value: The substring in the input which matches this token.
+        pos_start: The index in the input of the first character in this token. Inclusive.
+        pos_end: The index in the input of one past the last character in this token. Exclusive.
+    """
+    token_id: str
+    value: str
+    pos_start: int
+    pos_end: int
 
 
 class Lexer:
@@ -37,7 +55,7 @@ class Lexer:
     """
 
     def __init__(self, lexer_def: str):
-        self._tokens: list[Token] = []
+        self._token_matchers: list[TokenMatcher] = []
         for n_line, line in enumerate(lexer_def.split('\n')):
             line = line.strip()
             if not line: continue
@@ -58,7 +76,14 @@ class Lexer:
                 matching_rule = re.compile(matching_rule)
             except (SyntaxError, ValueError, AssertionError, re.PatternError) as e:
                 raise LexerError(f'Invalid matching rule in line {n_line + 1}') from e
-            self._tokens.append(Token(id=token_id, regexp=matching_rule))
+            self._token_matchers.append(TokenMatcher(id=token_id, regexp=matching_rule))
 
     def tokenize(self, input: str) -> Iterator[Token]:
-        pass  # TODO
+        pos = 0
+        while pos < len(input):
+            for matcher in self._token_matchers:
+                if m := re.match(matcher.regexp, input[pos:]):
+                    token_len = len(m.group(0))
+                    yield Token(token_id=matcher.id, value=m.group(0), pos_start=pos, pos_end=pos + token_len)
+                    pos += token_len
+                    break
