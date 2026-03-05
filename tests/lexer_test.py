@@ -37,7 +37,7 @@ class CreateLexerTest(unittest.TestCase):
             lexer.Lexer(rules)
 
 
-class LexerTest(unittest.TestCase):
+class LexerTokenizerTest(unittest.TestCase):
 
     def test_parse_arithmetic(self):
         l = lexer.Lexer(r'''
