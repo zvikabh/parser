@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: unit-tests
+        name: unit tests
+        entry: python -c "import sys; sys.path.insert(0, 'src'); import unittest; result = unittest.TextTestRunner().run(unittest.TestLoader().discover('tests', pattern='*.py')); sys.exit(0 if result.wasSuccessful() else 1)"
+        language: system
+        pass_filenames: false
+        always_run: true
