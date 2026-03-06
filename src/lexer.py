@@ -1,6 +1,5 @@
 """Lexical analyzer. Parses an input string into tokens."""
 
-import abc
 import ast
 import dataclasses
 import re
@@ -87,6 +86,10 @@ class Lexer:
             except (SyntaxError, ValueError, AssertionError, re.PatternError) as e:
                 raise LexerError(f'Invalid matching rule in line {n_line + 1}') from e
             self._token_matchers.append(TokenMatcher(id=token_id, regexp=matching_rule, emit=emit))
+
+    @property
+    def token_ids(self):
+        return [token.id for token in self._token_matchers]
 
     def tokenize(self, input: str) -> Iterator[Token]:
         pos = 0
