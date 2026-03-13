@@ -60,6 +60,15 @@ class LexerTokenizerTest(unittest.TestCase):
         # Whitespace is not emitted.
         self.assertEqual([token.value for token in tokens], ['Root', '->', 'Foo', 'Bar', 'Baz'])
 
+    def test_fail_to_parse(self):
+        l = lexer.Lexer(r'''
+            WS[emit=false]   r'\s+'
+            Identifier   r'[a-zA-Z][a-zA-Z0-9_]*'
+            Arrow        '->'
+        ''')
+        with self.assertRaisesRegex(lexer.LexerError, 'Failed to match any token at position 4'):
+            list(l.tokenize('Foo !'))
+
 
 if __name__ == '__main__':
     unittest.main()

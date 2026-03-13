@@ -101,3 +101,5 @@ class Lexer:
                         yield Token(token_id=matcher.id, value=m.group(0), pos_start=pos, pos_end=pos + token_len)
                     pos += token_len
                     break
+            else:
+                raise LexerError(f"Failed to match any token at position {pos}, currently at: {input[pos:pos+10]}")
