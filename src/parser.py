@@ -33,25 +33,6 @@ class Grammar:
         if not self.productions_by_left_id:
             raise ParserError(f"Expecting at least one production in the grammar")
 
-        # Add production rules for all optional identifiers.
-        # Support for optional identifiers is implemented by adding a production rule of the type
-        #   `Identifier? -> empty | Identifier`
-        # for all identifiers which appear with a `?` somewhere in the grammar.
-        all_optional_ids = set[str]()
-        for prod in self.productions_by_left_id.values():
-            for deriv in prod.derivations:
-                for term in deriv.terms:
-                    if term[-1] == '?':
-                        all_optional_ids.add(term[:-1])
-        for optional_id in all_optional_ids:
-            self.productions_by_left_id[optional_id + '?'] = Production(
-                left_id=optional_id + '?',
-                derivations=[
-                    Derivation([]),
-                    Derivation([optional_id])
-                ]
-            )
-
     @functools.cached_property
     def nonterminals(self) -> list[str]:
         return list(self.productions_by_left_id.keys())
@@ -169,6 +150,26 @@ class _GrammarParser:
             if prod.left_id in productions_by_left_id:
                 raise ParserError(f"Production '{prod.left_id}' appears twice in the grammar")
             productions_by_left_id[prod.left_id] = prod
+
+        # Add production rules for all optional identifiers.
+        # Support for optional identifiers is implemented by adding a production rule of the type
+        #   `Identifier? -> empty | Identifier`
+        # for all identifiers which appear with a `?` somewhere in the grammar.
+        all_optional_ids = set[str]()
+        for prod in productions_by_left_id.values():
+            for deriv in prod.derivations:
+                for term in deriv.terms:
+                    if term[-1] == '?':
+                        all_optional_ids.add(term[:-1])
+        for optional_id in all_optional_ids:
+            productions_by_left_id[optional_id + '?'] = Production(
+                left_id=optional_id + '?',
+                derivations=[
+                    Derivation([]),
+                    Derivation([optional_id])
+                ]
+            )
+
         return Grammar(productions_by_left_id)
 
     def parse_Productions(self) -> list[Production]:
@@ -212,14 +213,62 @@ class _ParsingTable:
 
     The specified grammar is LL(1) if and only if it can be converted to such a parsing table.
     An exception is raised when building the _ParsingTable object if the input grammar is not LL(1).
+
+    Attributes:
+        grammar: The grammar for which the parsing table is built.
+        first_terminals: Maps from nonterminal id in the grammar to the set of terminals which could be the first
+            terminal in a production of the nonterminal.
+            If the nonterminal may be parsed as ε, the value will include None.
     """
 
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
-        self.table = self._build_parsing_table()
+        self.first_terminals : dict[str, set[str | None]] = {}
+        for nonterminal in self.grammar.nonterminals:
+            self._find_first_terminals_for_nonterminal(nonterminal)
+        # TODO: Build following-terminals table
+
+    def _find_first_terminals_for_nonterminal(
+            self, nonterminal: str, recursion_path: list[tuple[str, Derivation]] | None = None
+    ) -> set[str | None]:
+        """Returns all possible values that may appear as the first terminal in a production of `nonterminal`.
+
+        If `nonterminal` may be parsed as ε, the output will include None.
+        """
+        if nonterminal in self.first_terminals:
+            return self.first_terminals[nonterminal]
+
+        # Check for loops in the recursion
+        recursion_path = recursion_path or []
+        for i, (prev_nonterm, prev_deriv) in enumerate(recursion_path):
+            if prev_nonterm == nonterminal:
+                # Found loop, build error message.
+                cycle = []
+                for loop_nonterm, loop_deriv in recursion_path[i:]:
+                    cycle.append(f'{loop_nonterm} -> {loop_deriv} ;')
+                cycle.append(f'{prev_nonterm} -> {prev_deriv} ;')
+                raise ParserError(f"Infinite left-recursion in grammar:\n{'\n'.join(cycle)}")
+
+        # Not a loop, and not computed yet. Compute possible first terminals.
+        first_terminals = set[str | None]()
+        for deriv in self.grammar.productions_by_left_id[nonterminal].derivations:
+            if not deriv.terms:
+                first_terminals.add(None)
+            elif deriv.terms[0] in self.grammar.terminals:
+                first_terminals.add(deriv.terms[0])
+            else:
+                recursion_path.append((nonterminal, deriv))
+                first_terminals |= self._find_first_terminals_for_nonterminal(deriv.terms[0], recursion_path)
+                recursion_path.pop()
+
+        self.first_terminals[nonterminal] = first_terminals
+        return first_terminals
 
     def _build_parsing_table(self) -> dict[tuple[str, str], Derivation]:
-        pass  # TODO
+        table : dict[tuple[str, str], Derivation] = {}
+        # The set of terminals that can begin a given derivation.
+
+        return table
 
 
 

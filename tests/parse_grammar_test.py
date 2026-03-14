@@ -93,5 +93,43 @@ class EnsureGrammarLexerConsistencyTest(unittest.TestCase):
             parser._ensure_grammar_lexer_consistency(self.lex, grammar)
 
 
+class ParsingTableFirstTerminalsTest(unittest.TestCase):
+
+    def test_simple(self):
+        grammar_str = '''
+            ROOT -> LITERAL ROOT? ;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        parsing_table = parser._ParsingTable(grammar)
+        self.assertEqual(len(parsing_table.first_terminals), 2)
+        self.assertEqual(parsing_table.first_terminals['ROOT'], {'LITERAL'})
+        self.assertEqual(parsing_table.first_terminals['ROOT?'], {None, 'LITERAL'})
+
+    def test_complex(self):
+        grammar_str = '''
+            ROOT -> Expr ;
+            Expr -> NUMBER MoreTerms? ;
+            MoreTerms -> OPERATOR Expr ;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        parsing_table = parser._ParsingTable(grammar)
+        self.assertEqual(len(parsing_table.first_terminals), 4)
+        self.assertEqual(parsing_table.first_terminals['ROOT'], {'NUMBER'})
+        self.assertEqual(parsing_table.first_terminals['Expr'], {'NUMBER'})
+        self.assertEqual(parsing_table.first_terminals['MoreTerms'], {'OPERATOR'})
+        self.assertEqual(parsing_table.first_terminals['MoreTerms?'], {None, 'OPERATOR'})
+
+    def test_invalid_grammar(self):
+        grammar_str = '''
+            ROOT -> Expr ;
+            Expr -> Term MoreTerms? ;
+            MoreTerms -> OPERATOR Expr ;
+            Term -> NUMBER | Expr ;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        with self.assertRaisesRegex(parser.ParserError, 'Infinite left-recursion in grammar'):
+            parser._ParsingTable(grammar)
+
+
 if __name__ == '__main__':
     unittest.main()
