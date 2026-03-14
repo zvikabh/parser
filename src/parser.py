@@ -33,6 +33,25 @@ class Grammar:
         if not self.productions_by_left_id:
             raise ParserError(f"Expecting at least one production in the grammar")
 
+        # Add production rules for all optional identifiers.
+        # Support for optional identifiers is implemented by adding a production rule of the type
+        #   `Identifier? -> empty | Identifier`
+        # for all identifiers which appear with a `?` somewhere in the grammar.
+        all_optional_ids = set[str]()
+        for prod in self.productions_by_left_id.values():
+            for deriv in prod.derivations:
+                for term in deriv.terms:
+                    if term[-1] == '?':
+                        all_optional_ids.add(term[:-1])
+        for optional_id in all_optional_ids:
+            self.productions_by_left_id[optional_id + '?'] = Production(
+                left_id=optional_id + '?',
+                derivations=[
+                    Derivation([]),
+                    Derivation([optional_id])
+                ]
+            )
+
     @functools.cached_property
     def nonterminals(self) -> list[str]:
         return list(self.productions_by_left_id.keys())
@@ -43,7 +62,7 @@ class Grammar:
         for prod in self.productions_by_left_id.values():
             for deriv in prod.derivations:
                 for term in deriv.terms:
-                    all_terms.add(term.id)
+                    all_terms.add(term)
         nonterminals = set(self.nonterminals)
         return list(all_terms - nonterminals)
 
@@ -69,21 +88,12 @@ class Production:
 
 @dataclasses.dataclass(frozen=True)
 class Derivation:
-    terms: list[Term]
+    terms: list[str]
 
     def __str__(self) -> str:
-        return ' '.join(str(term) for term in self.terms)
-
-
-@dataclasses.dataclass(frozen=True)
-class Term:
-    id: str
-    is_optional: bool  # Indicates whether this term is followed by a question mark.
-
-    def __str__(self) -> str:
-        if self.is_optional:
-            return self.id + "?"
-        return self.id
+        if not self.terms:
+            return 'ε'
+        return ' '.join(self.terms)
 
 
 def _parse_grammar(grammar: str) -> Grammar:
@@ -123,6 +133,10 @@ class _GrammarParser:
     AltDerivations -> VBAR Derivation AltDerivations? ;
     Derivation     -> empty | Term Derivation? ;
     Term           -> IDENTIFIER QUESTION_MARK? ;
+
+    Implementation note: During grammar parsing, terms followed by a question mark are converted to a production rule
+    of the form `Term? -> empty | Term`. The resulting grammar does not support question marks. Question marks are not
+    allowed as part of identifier strings, so there is no risk of collision with existing identifier strings.
     """
 
     def __init__(self, tokens: list[lexer.Token]) -> None:
@@ -179,12 +193,13 @@ class _GrammarParser:
             terms.append(self.parse_Term())
         return Derivation(terms=terms)
 
-    def parse_Term(self) -> Term:
+    def parse_Term(self) -> str:
         identifier = self.consume('IDENTIFIER').value
         is_optional = (self.cur_token.token_id == 'QUESTION_MARK')
         if is_optional:
             self.consume('QUESTION_MARK')
-        return Term(id=identifier, is_optional=is_optional)
+            identifier += '?'
+        return identifier
 
 
 class _ParsingTable:

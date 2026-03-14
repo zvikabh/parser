@@ -23,16 +23,20 @@ class ParseGrammarTest(unittest.TestCase):
     def test_grammar_with_optional(self):
         grammar_str = """
             ROOT -> LITERAL ROOT?;
+            LITERAL -> LETTER ROOT?;
         """
         grammar = parser._parse_grammar(grammar_str)
-        self.assertEqual(str(grammar), "ROOT -> LITERAL ROOT? ;")
+        self.assertEqual(str(grammar), """
+ROOT -> LITERAL ROOT? ;
+LITERAL -> LETTER ROOT? ;
+ROOT? -> ε\n    | ROOT ;""".strip())
 
     def test_grammar_missing_semicolon(self):
         grammar_str = """
             ROOT -> LITERAL ROOT?
         """
         with self.assertRaisesRegex(parser.ParserError, "expected SEMICOLON"):
-            grammar = parser._parse_grammar(grammar_str)
+            parser._parse_grammar(grammar_str)
 
     def test_grammar_missing_arrow(self):
         grammar_str = """
