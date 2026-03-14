@@ -121,7 +121,7 @@ class _GrammarParser:
     Productions    -> Production Productions? ;
     Production     -> IDENTIFIER ARROW Derivation AltDerivations? SEMICOLON ;
     AltDerivations -> VBAR Derivation AltDerivations? ;
-    Derivation     -> Term Derivation? ;
+    Derivation     -> empty | Term Derivation? ;
     Term           -> IDENTIFIER QUESTION_MARK? ;
     """
 
@@ -174,7 +174,7 @@ class _GrammarParser:
         return Production(left_id=left_id, derivations=derivations)
 
     def parse_Derivation(self) -> Derivation:
-        terms = [self.parse_Term()]
+        terms = []
         while self.cur_token.token_id == 'IDENTIFIER':
             terms.append(self.parse_Term())
         return Derivation(terms=terms)
