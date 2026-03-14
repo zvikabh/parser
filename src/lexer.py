@@ -2,6 +2,7 @@
 
 import ast
 import dataclasses
+import functools
 import re
 from typing import Iterator
 
@@ -87,9 +88,13 @@ class Lexer:
                 raise LexerError(f'Invalid matching rule in line {n_line + 1}') from e
             self._token_matchers.append(TokenMatcher(id=token_id, regexp=matching_rule, emit=emit))
 
-    @property
-    def token_ids(self):
+    @functools.cached_property
+    def token_ids(self) -> list[str]:
         return [token.id for token in self._token_matchers]
+
+    @functools.cached_property
+    def emitted_token_ids(self) -> list[str]:
+        return [token.id for token in self._token_matchers if token.emit]
 
     def tokenize(self, input: str) -> Iterator[Token]:
         pos = 0

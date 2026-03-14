@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 import dataclasses
+import functools
 
 import lexer
+from lexer import Lexer
 
 
 class ParserError(Exception):
     """Raised when the parser encounters ungrammatical input."""
-
-
-@dataclasses.dataclass(frozen=True)
-class Node:
-    children: list[Node]
-    token: lexer.Token | None = None  # Only for terminal nodes
 
 
 # Lexer definition for the input grammar definition.
@@ -31,17 +27,28 @@ IDENTIFIER                '[a-zA-Z][a-zA-Z0-9_]*'
 @dataclasses.dataclass(frozen=True)
 class Grammar:
     """AST of the user-specified grammar."""
-    productions: list[Production]
+    productions_by_left_id: dict[str, Production]
 
     def __post_init__(self):
-        if not self.productions:
+        if not self.productions_by_left_id:
             raise ParserError(f"Expecting at least one production in the grammar")
-        left_ids = {prod.left_id for prod in self.productions}
-        if len(left_ids) != len(self.productions):
-            raise ParserError(f"Duplicate production ids in grammar")
+
+    @functools.cached_property
+    def nonterminals(self) -> list[str]:
+        return list(self.productions_by_left_id.keys())
+
+    @functools.cached_property
+    def terminals(self) -> list[str]:
+        all_terms = set[str]()
+        for prod in self.productions_by_left_id.values():
+            for deriv in prod.derivations:
+                for term in deriv.terms:
+                    all_terms.add(term.id)
+        nonterminals = set(self.nonterminals)
+        return list(all_terms - nonterminals)
 
     def __str__(self) -> str:
-        return "\n".join(str(prod) for prod in self.productions)
+        return "\n".join(str(prod) for prod in self.productions_by_left_id.values())
 
 
 @dataclasses.dataclass(frozen=True)
@@ -90,6 +97,21 @@ def _parse_grammar(grammar: str) -> Grammar:
     return grammar_parser.parse_ROOT()
 
 
+def _ensure_grammar_lexer_consistency(lex: Lexer, grammar: Grammar):
+    token_ids_set = set(lex.emitted_token_ids)
+    terminals_set = set(grammar.terminals)
+    if orphaned_lexer_tokens := token_ids_set - terminals_set:
+        raise ParserError(
+            f"The token(s) [{', '.join(orphaned_lexer_tokens)}] are defined by the lexer, but never referenced "
+            f"by the grammar. Consider adding [emit=false] to prevent them from reaching the parser."
+        )
+    if orphaned_terminals := terminals_set - token_ids_set:
+        raise ParserError(
+            f"The terminal(s) [{', '.join(orphaned_terminals)}] are mentioned on the right side of productions, "
+            f"but they do not appear either in the left side of productions or as lexer terminals."
+        )
+
+
 class _GrammarParser:
     """A parser for the grammar rules.
 
@@ -127,7 +149,13 @@ class _GrammarParser:
         return token
 
     def parse_ROOT(self) -> Grammar:
-        return Grammar(productions=self.parse_Productions())
+        productions = self.parse_Productions()
+        productions_by_left_id = {}
+        for prod in productions:
+            if prod.left_id in productions_by_left_id:
+                raise ParserError(f"Production '{prod.left_id}' appears twice in the grammar")
+            productions_by_left_id[prod.left_id] = prod
+        return Grammar(productions_by_left_id)
 
     def parse_Productions(self) -> list[Production]:
         production = self.parse_Production()
@@ -159,6 +187,33 @@ class _GrammarParser:
         return Term(id=identifier, is_optional=is_optional)
 
 
+class _ParsingTable:
+    """A parsing table for a given LL(1) grammar.
+
+    The entry at parsing_table[nonterminal, terminal] can be either:
+    - `None`, if `terminal` is not allowed when starting to parse `nonterminal`.
+    - One of the derivations in one of the productions in the grammar, indicating that this derivation is the one to be
+      produced when encountering `terminal` while starting to parse `nonterminal`.
+
+    The specified grammar is LL(1) if and only if it can be converted to such a parsing table.
+    An exception is raised when building the _ParsingTable object if the input grammar is not LL(1).
+    """
+
+    def __init__(self, grammar: Grammar):
+        self.grammar = grammar
+        self.table = self._build_parsing_table()
+
+    def _build_parsing_table(self) -> dict[tuple[str, str], Derivation]:
+        pass  # TODO
+
+
+
+@dataclasses.dataclass(frozen=True)
+class Node:
+    children: list[Node]
+    token: lexer.Token | None = None  # Only for terminal nodes
+
+
 class Parser:
     r"""LL(1) context-free grammar parser. Parses an input into an abstract syntax tree.
 
@@ -185,3 +240,8 @@ class Parser:
     def __init__(self, lex: lexer.Lexer, grammar: str) -> None:
         self.lexer = lex
         self.grammar = _parse_grammar(grammar)
+        _ensure_grammar_lexer_consistency(lex, self.grammar)
+        self.parsing_table = _ParsingTable(self.grammar)
+
+    def parse(self, input: str) -> Node:
+        pass  # TODO

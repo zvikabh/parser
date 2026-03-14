@@ -1,5 +1,6 @@
 import unittest
 
+import lexer
 import parser
 
 
@@ -12,9 +13,12 @@ class ParseGrammarTest(unittest.TestCase):
                   | NUMBER MINUS NUMBER ;
         """
         grammar = parser._parse_grammar(grammar_str)
-        self.assertEqual(2, len(grammar.productions))
-        self.assertEqual(str(grammar.productions[0]), "ROOT -> Sum ;")
-        self.assertEqual(str(grammar.productions[1]), "Sum -> NUMBER PLUS NUMBER\n    | NUMBER MINUS NUMBER ;")
+        self.assertEqual(2, len(grammar.productions_by_left_id))
+        self.assertEqual(str(grammar.productions_by_left_id["ROOT"]), "ROOT -> Sum ;")
+        self.assertEqual(
+            str(grammar.productions_by_left_id["Sum"]),
+            "Sum -> NUMBER PLUS NUMBER\n    | NUMBER MINUS NUMBER ;"
+        )
 
     def test_grammar_with_optional(self):
         grammar_str = """
@@ -43,6 +47,46 @@ class ParseGrammarTest(unittest.TestCase):
         """
         with self.assertRaisesRegex(parser.ParserError, "Failed to parse grammar"):
             parser._parse_grammar(grammar_str)
+
+
+class EnsureGrammarLexerConsistencyTest(unittest.TestCase):
+
+    def setUp(self):
+        self.lex = lexer.Lexer(r'''
+            WS[emit=false]    r"\s+"
+            Number            r'[0-9]+(\.[0-9]*)?'
+            Operator          r'\+|\-|\*|\/'
+        ''')
+
+    def test_happy_flow(self):
+        grammar_str = '''
+            ROOT -> Number Operator Number;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        parser._ensure_grammar_lexer_consistency(self.lex, grammar)
+
+    def test_orphaned_token(self):
+        grammar_str = '''
+            ROOT -> Operator;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        with self.assertRaisesRegex(
+                parser.ParserError,
+                r"The token\(s\) \[Number\] are defined by the lexer, but never referenced by the grammar."
+        ):
+            parser._ensure_grammar_lexer_consistency(self.lex, grammar)
+
+    def test_orphaned_terminal(self):
+        grammar_str = '''
+            ROOT -> Number Operator Number
+                  | Sign Number;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        with self.assertRaisesRegex(
+                parser.ParserError,
+                r"The terminal\(s\) \[Sign\] are mentioned on the right side of productions"
+        ):
+            parser._ensure_grammar_lexer_consistency(self.lex, grammar)
 
 
 if __name__ == '__main__':
