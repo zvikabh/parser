@@ -1,6 +1,7 @@
 """LL(1) context-free grammar parser. Parses an input into an abstract syntax tree."""
 
 from __future__ import annotations
+import collections
 import dataclasses
 import functools
 
@@ -31,7 +32,9 @@ class Grammar:
 
     def __post_init__(self):
         if not self.productions_by_left_id:
-            raise ParserError(f"Expecting at least one production in the grammar")
+            raise ParserError("Expecting at least one production in the grammar")
+        if "ROOT" not in self.productions_by_left_id:
+            raise ParserError("Grammar must have a `ROOT` node")
 
     @functools.cached_property
     def nonterminals(self) -> list[str]:
@@ -216,9 +219,12 @@ class _ParsingTable:
 
     Attributes:
         grammar: The grammar for which the parsing table is built.
-        first_terminals: Maps from nonterminal id in the grammar to the set of terminals which could be the first
+        first_terminals: Maps from nonterminal id to the set of terminals which could be the first
             terminal in a production of the nonterminal.
             If the nonterminal may be parsed as ε, the value will include None.
+        follow_terminals: Map from nonterminal id to the set of terminals which could follow immediately after parsing
+            that nonterminal.
+            If the nonterminal can be the last nonterminal in a valid derivation, the value will include None.
     """
 
     def __init__(self, grammar: Grammar):
@@ -226,7 +232,7 @@ class _ParsingTable:
         self.first_terminals : dict[str, set[str | None]] = {}
         for nonterminal in self.grammar.nonterminals:
             self._find_first_terminals_for_nonterminal(nonterminal)
-        # TODO: Build following-terminals table
+        self.follow_terminals = self._find_follow_terminals()
 
     def _find_first_terminals_for_nonterminal(
             self, nonterminal: str, recursion_path: list[tuple[str, Derivation]] | None = None
@@ -264,12 +270,62 @@ class _ParsingTable:
         self.first_terminals[nonterminal] = first_terminals
         return first_terminals
 
-    def _build_parsing_table(self) -> dict[tuple[str, str], Derivation]:
-        table : dict[tuple[str, str], Derivation] = {}
-        # The set of terminals that can begin a given derivation.
+    def _find_follow_terminals(self) -> dict[str, set[str | None]]:
+        """Builds a map from nonterminal id to the set of all terminals which could follow it."""
+        follow_terminals = {nonterm: set[str | None]() for nonterm in self.grammar.nonterminals}
+        follow_terminals['ROOT'] = {None}
 
-        return table
+        # Map from nonterminal to derivations containing it.
+        # Each entry in the value contains the production_id, derivation, and index in the derivation pointing to the
+        # nonterminal.
+        nonterm_to_deriv = collections.defaultdict(list[tuple[str, Derivation, int]])
+        for prod_id, prod in self.grammar.productions_by_left_id.items():
+            for deriv in prod.derivations:
+                for pos, term in enumerate(deriv.terms):
+                    if term in self.grammar.nonterminals:
+                        nonterm_to_deriv[term].append((prod_id, deriv, pos))
 
+        found_change = True
+        while found_change:
+            found_change = False
+            for nonterm in self.grammar.nonterminals:
+                curr_follow = follow_terminals[nonterm]
+                for prod_id, deriv, pos in nonterm_to_deriv[nonterm]:
+                    if pos == len(deriv.terms) - 1:
+                        # `nonterm` is the last term in the derivation. Add FOLLOW(prod_id) to curr_follow.
+                        found_change = _extend_set(curr_follow, follow_terminals[prod_id]) or found_change
+                    else:
+                        next_term = deriv.terms[pos + 1]
+                        if next_term in self.grammar.terminals:
+                            # `non_term` can be followed by the terminal `next_term`.
+                            found_change = _extend_set(curr_follow, {next_term}) or found_change
+                        else:
+                            # `non_term` can be followed by FIRST(next_term).
+                            found_change = _extend_set(curr_follow, self.first_terminals[next_term]) or found_change
+
+                        # Check whether deriv.terms[pos+1:] (all the way to the end) could all be empty.
+                        # If so, we need to also add follow_terminals[prod_id].
+                        can_be_empty = []
+                        for t in deriv.terms[pos+1:]:
+                            can_be_empty.append(t in self.grammar.nonterminals and None in self.first_terminals[t])
+                        if all(can_be_empty):
+                            found_change = _extend_set(curr_follow, follow_terminals[prod_id]) or found_change
+
+        return follow_terminals
+
+
+def _extend_set(target_set: set, to_add: set) -> bool:
+    """Add the items in `to_add` to the set `target_set`. Returns True if at least one new item was added."""
+    # added = False
+    # for item in to_add:
+    #     if item not in target_set:
+    #         target_set.add(item)
+    #         print(f'Added {item}')
+    #         added = True
+    # return added
+    original_size = len(target_set)
+    target_set.update(to_add)
+    return len(target_set) > original_size
 
 
 @dataclasses.dataclass(frozen=True)
