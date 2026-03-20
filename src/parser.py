@@ -237,6 +237,8 @@ class _ParsingTable:
             the parsing rule which matches it. If no possible derivation matches this situation, the table will have
             no entry in this position. The definition of an LL(1) grammar is that this table contains no more than one
             derivation in every cell.
+            `next_terminal` can also be '$' which indicates that `current_nonterminal` is allowed to be the final
+            nonterminal in the production.
     """
 
     def __init__(self, grammar: Grammar):
@@ -246,7 +248,7 @@ class _ParsingTable:
         for nonterminal in self.grammar.nonterminals:
             self._find_first_terminals_for_nonterminal(nonterminal)
         self.follow_terminals = self._find_follow_terminals()
-        self._table = self._build_parsing_table()
+        self._build_parsing_table()
 
     def _find_first_terminals_for_nonterminal(
             self, nonterminal: str, recursion_path: list[tuple[str, Derivation]] | None = None
@@ -284,7 +286,18 @@ class _ParsingTable:
                 first_terminals_for_deriv[deriv].add(deriv.terms[0])
             else:
                 recursion_path.append((nonterminal, deriv))
-                first_terms_for_cur_deriv = self._find_first_terminals_for_nonterminal(deriv.terms[0], recursion_path)
+                pos_in_deriv = 0
+                first_terms_for_cur_deriv = set()
+                while pos_in_deriv < len(deriv.terms):
+                    first_terms_for_cur_term = self._find_first_terminals_for_nonterminal(
+                        deriv.terms[pos_in_deriv], recursion_path
+                    )
+                    first_terms_for_cur_deriv |= (first_terms_for_cur_term - {None})
+                    if None not in first_terms_for_cur_term:
+                        break
+                    pos_in_deriv += 1
+                else:
+                    first_terms_for_cur_deriv.add(None)
                 first_terminals |= first_terms_for_cur_deriv
                 first_terminals_for_deriv[deriv] |= first_terms_for_cur_deriv
                 recursion_path.pop()
@@ -339,11 +352,26 @@ class _ParsingTable:
 
         return follow_terminals
 
-    def _build_parsing_table(self) -> dict[tuple[str, str], Derivation | None]:
+    def _build_parsing_table(self) -> None:
         """Builds the parsing table returned by self[nonterminal, terminal]."""
-        for nonterm, production in self.grammar.productions_by_left_id.items():
-            for deriv in production.derivations:
-                pass # TODO
+        self._table = dict[tuple[str, str], Derivation]()
+        for nonterm in self.grammar.nonterminals:
+            for deriv, first_terminals in self.first_terminals_for_deriv[nonterm].items():
+                for terminal in first_terminals:
+                    if terminal is None:
+                        continue
+                    self._add_deriv_to_parsing_table(nonterm, terminal, deriv)
+                if None in first_terminals:
+                    for terminal in self.follow_terminals[nonterm]:
+                        self._add_deriv_to_parsing_table(nonterm, terminal or '$', deriv)
+
+    def _add_deriv_to_parsing_table(self, nonterm: str, terminal: str, deriv: Derivation) -> None:
+        if existing_deriv := self._table.get((nonterm, terminal)):
+            raise ParserError(
+                f"LL(1) violation when parsing {nonterm} and observing token {terminal}: "
+                f"Can be parsed as either {existing_deriv} or {deriv}"
+            )
+        self._table[nonterm, terminal] = deriv
 
     def __getitem__(self, item: tuple[str, str]) -> Derivation | None:
         """The derivation to be produced if the current nonterminal is item[0] and the next terminal is item[1].

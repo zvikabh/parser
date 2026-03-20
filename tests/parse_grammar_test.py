@@ -1,3 +1,4 @@
+import collections
 import unittest
 
 import lexer
@@ -173,8 +174,32 @@ class ParsingTableFirstTerminalsTest(unittest.TestCase):
             }
         )
 
-        # self.assertEqual(parsing_table.first_terminals_for_deriv['MoreTerms'], {'OPERATOR'})
-        # self.assertEqual(parsing_table.first_terminals_for_deriv['MoreTerms?'], {None, 'OPERATOR'})
+    def test_more_complex(self):
+        grammar_str = '''
+            ROOT -> EqSystem ;
+            EqSystem -> Eq MoreEqs? ;
+            MoreEqs -> NEWLINE Eq MoreEqs? ;
+            Eq -> Expr EQUALS Expr ;
+            Expr -> FirstTerm OtherTerms? ;
+            FirstTerm -> SIGN? ActualTerm ;
+            ActualTerm -> INTEGER VARNAME? | VARNAME ;
+            OtherTerms -> SIGN ActualTerm OtherTerms? ;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        parsing_table = parser._ParsingTable(grammar)
+        self.assertEqual(len(parsing_table.first_terminals_for_nonterminal), 12)
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['ROOT'], {'SIGN', 'INTEGER', 'VARNAME'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['EqSystem'], {'SIGN', 'INTEGER', 'VARNAME'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['MoreEqs'], {'NEWLINE'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['MoreEqs?'], {None, 'NEWLINE'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['Eq'], {'SIGN', 'INTEGER', 'VARNAME'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['Expr'], {'SIGN', 'INTEGER', 'VARNAME'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['FirstTerm'], {'SIGN', 'INTEGER', 'VARNAME'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['ActualTerm'], {'INTEGER', 'VARNAME'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['OtherTerms'], {'SIGN'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['OtherTerms?'], {None, 'SIGN'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['VARNAME?'], {None, 'VARNAME'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['SIGN?'], {None, 'SIGN'})
 
     def test_invalid_grammar(self):
         grammar_str = '''
@@ -249,6 +274,146 @@ class ParsingTableFollowTerminalsTest(unittest.TestCase):
         self.assertEqual(parsing_table.follow_terminals['OtherTerms?'], {None, 'NEWLINE', 'EQUALS'})
         self.assertEqual(parsing_table.follow_terminals['VARNAME?'], {None, 'NEWLINE', 'SIGN', 'EQUALS'})
         self.assertEqual(parsing_table.follow_terminals['SIGN?'], {'INTEGER', 'VARNAME'})
+
+
+class ParsingTableTest(unittest.TestCase):
+
+    def test_simple(self):
+        grammar_str = '''
+            ROOT -> Expr ;
+            Expr -> NUMBER MoreTerms? ;
+            MoreTerms -> OPERATOR Expr ;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        parsing_table = parser._ParsingTable(grammar)
+
+        two_stage_parsing_table = collections.defaultdict(dict)
+        for (nonterminal, terminal), deriv in parsing_table._table.items():
+            two_stage_parsing_table[nonterminal][terminal] = deriv
+
+        self.assertEqual(len(two_stage_parsing_table), 4)
+        self.assertEqual(
+            two_stage_parsing_table['ROOT'],
+            {
+                'NUMBER': Derivation(('Expr',))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['Expr'],
+            {
+                'NUMBER': Derivation(('NUMBER', 'MoreTerms?'))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['MoreTerms'],
+            {
+                'OPERATOR': Derivation(('OPERATOR', 'Expr'))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['MoreTerms?'],
+            {
+                'OPERATOR': Derivation(('MoreTerms',)),
+                '$': Derivation(())
+            }
+        )
+
+    def test_complex(self):
+        grammar_str = '''
+            ROOT -> EqSystem ;
+            EqSystem -> Eq MoreEqs? ;
+            MoreEqs -> NEWLINE Eq MoreEqs? ;
+            Eq -> Expr EQUALS Expr ;
+            Expr -> FirstTerm OtherTerms? ;
+            FirstTerm -> SIGN? ActualTerm ;
+            ActualTerm -> INTEGER VARNAME? | VARNAME ;
+            OtherTerms -> SIGN ActualTerm OtherTerms? ;
+        '''
+        grammar = parser._parse_grammar(grammar_str)
+        parsing_table = parser._ParsingTable(grammar)
+
+        two_stage_parsing_table = collections.defaultdict(dict)
+        for (nonterminal, terminal), deriv in parsing_table._table.items():
+            two_stage_parsing_table[nonterminal][terminal] = deriv
+
+        self.assertEqual(len(two_stage_parsing_table), 12)
+        self.assertEqual(
+            two_stage_parsing_table['ROOT'],
+            {
+                'SIGN': Derivation(('EqSystem',)),
+                'INTEGER': Derivation(('EqSystem',)),
+                'VARNAME': Derivation(('EqSystem',)),
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['EqSystem'].keys(),
+            two_stage_parsing_table['ROOT'].keys()
+        )
+        self.assertEqual(
+            two_stage_parsing_table['MoreEqs'],
+            {
+                'NEWLINE': Derivation(('NEWLINE', 'Eq', 'MoreEqs?'))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['Eq'].keys(),
+            two_stage_parsing_table['ROOT'].keys()
+        )
+        self.assertEqual(
+            two_stage_parsing_table['Expr'].keys(),
+            two_stage_parsing_table['ROOT'].keys()
+        )
+        self.assertEqual(
+            two_stage_parsing_table['FirstTerm'].keys(),
+            two_stage_parsing_table['ROOT'].keys()
+        )
+        self.assertEqual(
+            two_stage_parsing_table['ActualTerm'],
+            {
+                'INTEGER': Derivation(('INTEGER', 'VARNAME?')),
+                'VARNAME': Derivation(('VARNAME',))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['OtherTerms'],
+            {
+                'SIGN': Derivation(('SIGN', 'ActualTerm', 'OtherTerms?'))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['MoreEqs?'],
+            {
+                '$': Derivation(()),
+                'NEWLINE': Derivation(('MoreEqs',))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['OtherTerms?'],
+            {
+                '$': Derivation(()),
+                'EQUALS': Derivation(()),
+                'NEWLINE': Derivation(()),
+                'SIGN': Derivation(('OtherTerms',))
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['SIGN?'],
+            {
+                'SIGN': Derivation(('SIGN',)),
+                'INTEGER': Derivation(()),
+                'VARNAME': Derivation(()),
+            }
+        )
+        self.assertEqual(
+            two_stage_parsing_table['VARNAME?'],
+            {
+                'VARNAME': Derivation(('VARNAME',)),
+                'EQUALS': Derivation(()),
+                'NEWLINE': Derivation(()),
+                'SIGN': Derivation(()),
+                '$': Derivation(()),
+            }
+        )
 
 
 if __name__ == '__main__':
