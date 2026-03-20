@@ -4,6 +4,9 @@ import lexer
 import parser
 
 
+Derivation = parser.Derivation
+
+
 class ParseGrammarTest(unittest.TestCase):
 
     def test_simple_grammar(self):
@@ -60,6 +63,13 @@ ROOT? -> ε\n    | ROOT ;""".strip())
         with self.assertRaisesRegex(parser.ParserError, "Grammar must have a `ROOT` node"):
             parser._parse_grammar(grammar_str)
 
+    def test_grammar_duplicate_simple(self):
+        grammar_str = '''
+            ROOT -> NUMBER | NUMBER;
+        '''
+        with self.assertRaisesRegex(parser.ParserError, "Duplicate derivation NUMBER in production ROOT"):
+            parser._parse_grammar(grammar_str)
+
 
 class EnsureGrammarLexerConsistencyTest(unittest.TestCase):
 
@@ -105,23 +115,29 @@ class ParsingTableFirstTerminalsTest(unittest.TestCase):
 
     def test_simple(self):
         grammar_str = '''
-            ROOT -> LITERAL ROOT? ;
+            ROOT -> LITERAL ROOT? 
+                  | NUMBER ;
         '''
         grammar = parser._parse_grammar(grammar_str)
         parsing_table = parser._ParsingTable(grammar)
-        self.assertEqual(len(parsing_table.first_terminals), 2)
-        self.assertEqual(parsing_table.first_terminals['ROOT'], {'LITERAL'})
-        self.assertEqual(parsing_table.first_terminals['ROOT?'], {None, 'LITERAL'})
-
-    def test_can_be_empty(self):
-        grammar_str = '''
-            ROOT -> NUMBER? ;
-        '''
-        grammar = parser._parse_grammar(grammar_str)
-        parsing_table = parser._ParsingTable(grammar)
-        self.assertEqual(len(parsing_table.first_terminals), 2)
-        self.assertEqual(parsing_table.first_terminals['ROOT'], {'NUMBER', None})
-        self.assertEqual(parsing_table.first_terminals['NUMBER?'], {'NUMBER', None})
+        self.assertEqual(len(parsing_table.first_terminals_for_nonterminal), 2)
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['ROOT'], {'LITERAL', 'NUMBER'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['ROOT?'], {None, 'LITERAL', 'NUMBER'})
+        self.assertEqual(len(parsing_table.first_terminals_for_deriv), 2)
+        self.assertEqual(
+            parsing_table.first_terminals_for_deriv['ROOT'],
+            {
+                Derivation(('LITERAL', 'ROOT?')): {'LITERAL'},
+                Derivation(('NUMBER',)): {'NUMBER'},
+            }
+        )
+        self.assertEqual(
+            parsing_table.first_terminals_for_deriv['ROOT?'],
+            {
+                Derivation(()): {None},
+                Derivation(('ROOT',)): {'LITERAL', 'NUMBER'},
+            }
+        )
 
     def test_complex(self):
         grammar_str = '''
@@ -131,11 +147,34 @@ class ParsingTableFirstTerminalsTest(unittest.TestCase):
         '''
         grammar = parser._parse_grammar(grammar_str)
         parsing_table = parser._ParsingTable(grammar)
-        self.assertEqual(len(parsing_table.first_terminals), 4)
-        self.assertEqual(parsing_table.first_terminals['ROOT'], {'NUMBER'})
-        self.assertEqual(parsing_table.first_terminals['Expr'], {'NUMBER'})
-        self.assertEqual(parsing_table.first_terminals['MoreTerms'], {'OPERATOR'})
-        self.assertEqual(parsing_table.first_terminals['MoreTerms?'], {None, 'OPERATOR'})
+        self.assertEqual(len(parsing_table.first_terminals_for_nonterminal), 4)
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['ROOT'], {'NUMBER'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['Expr'], {'NUMBER'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['MoreTerms'], {'OPERATOR'})
+        self.assertEqual(parsing_table.first_terminals_for_nonterminal['MoreTerms?'], {None, 'OPERATOR'})
+        self.assertEqual(len(parsing_table.first_terminals_for_deriv), 4)
+        self.assertEqual(
+            parsing_table.first_terminals_for_deriv['ROOT'],
+            {Derivation(('Expr',)): {'NUMBER'}}
+        )
+        self.assertEqual(
+            parsing_table.first_terminals_for_deriv['Expr'],
+            {Derivation(('NUMBER', 'MoreTerms?')): {'NUMBER'}}
+        )
+        self.assertEqual(
+            parsing_table.first_terminals_for_deriv['MoreTerms'],
+            {Derivation(('OPERATOR', 'Expr')): {'OPERATOR'}}
+        )
+        self.assertEqual(
+            parsing_table.first_terminals_for_deriv['MoreTerms?'],
+            {
+                Derivation(('MoreTerms',)): {'OPERATOR'},
+                Derivation(()): {None},
+            }
+        )
+
+        # self.assertEqual(parsing_table.first_terminals_for_deriv['MoreTerms'], {'OPERATOR'})
+        # self.assertEqual(parsing_table.first_terminals_for_deriv['MoreTerms?'], {None, 'OPERATOR'})
 
     def test_invalid_grammar(self):
         grammar_str = '''

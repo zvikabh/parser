@@ -62,6 +62,10 @@ class Production:
     def __post_init__(self):
         if not self.derivations:
             raise ParserError(f"Expecting at least one derivation in production {self.left_id}")
+        for i, deriv1 in enumerate(self.derivations):
+            for deriv2 in self.derivations[i+1:]:
+                if deriv1 == deriv2:
+                    raise ParserError(f"Duplicate derivation {deriv1} in production {self.left_id}")
 
     def __str__(self) -> str:
         s = f"{self.left_id} -> {self.derivations[0]}"
@@ -72,7 +76,7 @@ class Production:
 
 @dataclasses.dataclass(frozen=True)
 class Derivation:
-    terms: list[str]
+    terms: tuple[str, ...]
 
     def __str__(self) -> str:
         if not self.terms:
@@ -168,8 +172,8 @@ class _GrammarParser:
             productions_by_left_id[optional_id + '?'] = Production(
                 left_id=optional_id + '?',
                 derivations=[
-                    Derivation([]),
-                    Derivation([optional_id])
+                    Derivation(()),
+                    Derivation((optional_id,))
                 ]
             )
 
@@ -195,7 +199,7 @@ class _GrammarParser:
         terms = []
         while self.cur_token.token_id == 'IDENTIFIER':
             terms.append(self.parse_Term())
-        return Derivation(terms=terms)
+        return Derivation(terms=tuple(terms))
 
     def parse_Term(self) -> str:
         identifier = self.consume('IDENTIFIER').value
@@ -219,20 +223,30 @@ class _ParsingTable:
 
     Attributes:
         grammar: The grammar for which the parsing table is built.
-        first_terminals: Maps from nonterminal id to the set of terminals which could be the first
+        first_terminals_for_nonterminal: Maps from nonterminal id to the set of terminals which could be the first
             terminal in a production of the nonterminal.
             If the nonterminal may be parsed as ε, the value will include None.
+        first_terminals_for_deriv: Maps from nonterminal and one of its derivations to the set of terminals which could
+            be the first terminal in a production of that derivation.
+            If the derivation may be parsed as ε, the value will include None.
         follow_terminals: Map from nonterminal id to the set of terminals which could follow immediately after parsing
             that nonterminal.
             If the nonterminal can be the last nonterminal in a valid derivation, the value will include None.
+        _table: Map from (current_nonterminal, next_terminal) to a Derivation. If we are currently starting to parse
+            `current_nonterminal`, and the next token to be parsed is `next_terminal`, then the returned derivation is
+            the parsing rule which matches it. If no possible derivation matches this situation, the table will have
+            no entry in this position. The definition of an LL(1) grammar is that this table contains no more than one
+            derivation in every cell.
     """
 
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
-        self.first_terminals : dict[str, set[str | None]] = {}
+        self.first_terminals_for_nonterminal : dict[str, set[str | None]] = {}
+        self.first_terminals_for_deriv: dict[str, dict[Derivation, set[str | None]]] = {}
         for nonterminal in self.grammar.nonterminals:
             self._find_first_terminals_for_nonterminal(nonterminal)
         self.follow_terminals = self._find_follow_terminals()
+        self._table = self._build_parsing_table()
 
     def _find_first_terminals_for_nonterminal(
             self, nonterminal: str, recursion_path: list[tuple[str, Derivation]] | None = None
@@ -240,9 +254,11 @@ class _ParsingTable:
         """Returns all possible values that may appear as the first terminal in a production of `nonterminal`.
 
         If `nonterminal` may be parsed as ε, the output will include None.
+
+        Along the way, if self.first_terminals_for_deriv has not been computed yet, calculates that as well.
         """
-        if nonterminal in self.first_terminals:
-            return self.first_terminals[nonterminal]
+        if nonterminal in self.first_terminals_for_nonterminal:
+            return self.first_terminals_for_nonterminal[nonterminal]
 
         # Check for loops in the recursion
         recursion_path = recursion_path or []
@@ -257,17 +273,24 @@ class _ParsingTable:
 
         # Not a loop, and not computed yet. Compute possible first terminals.
         first_terminals = set[str | None]()
+        first_terminals_for_deriv = dict[Derivation, set[str | None]]()
         for deriv in self.grammar.productions_by_left_id[nonterminal].derivations:
+            first_terminals_for_deriv[deriv] = set[str | None]()
             if not deriv.terms:
                 first_terminals.add(None)
+                first_terminals_for_deriv[deriv].add(None)
             elif deriv.terms[0] in self.grammar.terminals:
                 first_terminals.add(deriv.terms[0])
+                first_terminals_for_deriv[deriv].add(deriv.terms[0])
             else:
                 recursion_path.append((nonterminal, deriv))
-                first_terminals |= self._find_first_terminals_for_nonterminal(deriv.terms[0], recursion_path)
+                first_terms_for_cur_deriv = self._find_first_terminals_for_nonterminal(deriv.terms[0], recursion_path)
+                first_terminals |= first_terms_for_cur_deriv
+                first_terminals_for_deriv[deriv] |= first_terms_for_cur_deriv
                 recursion_path.pop()
 
-        self.first_terminals[nonterminal] = first_terminals
+        self.first_terminals_for_nonterminal[nonterminal] = first_terminals
+        self.first_terminals_for_deriv[nonterminal] = first_terminals_for_deriv
         return first_terminals
 
     def _find_follow_terminals(self) -> dict[str, set[str | None]]:
@@ -286,6 +309,9 @@ class _ParsingTable:
                         nonterm_to_deriv[term].append((prod_id, deriv, pos))
 
         found_change = True
+        # Repeat the loop until no more changes found.
+        # Guaranteed to terminate because if changes were found, this means that some terminal was added to one of the
+        # entries in `follow_terminals`, and there is a finite number of terminals which can be added.
         while found_change:
             found_change = False
             for nonterm in self.grammar.nonterminals:
@@ -301,17 +327,34 @@ class _ParsingTable:
                             found_change = _extend_set(curr_follow, {next_term}) or found_change
                         else:
                             # `non_term` can be followed by FIRST(next_term).
-                            found_change = _extend_set(curr_follow, self.first_terminals[next_term]) or found_change
+                            found_change = _extend_set(curr_follow, self.first_terminals_for_nonterminal[next_term]) or found_change
 
                         # Check whether deriv.terms[pos+1:] (all the way to the end) could all be empty.
                         # If so, we need to also add follow_terminals[prod_id].
                         can_be_empty = []
                         for t in deriv.terms[pos+1:]:
-                            can_be_empty.append(t in self.grammar.nonterminals and None in self.first_terminals[t])
+                            can_be_empty.append(t in self.grammar.nonterminals and None in self.first_terminals_for_nonterminal[t])
                         if all(can_be_empty):
                             found_change = _extend_set(curr_follow, follow_terminals[prod_id]) or found_change
 
         return follow_terminals
+
+    def _build_parsing_table(self) -> dict[tuple[str, str], Derivation | None]:
+        """Builds the parsing table returned by self[nonterminal, terminal]."""
+        for nonterm, production in self.grammar.productions_by_left_id.items():
+            for deriv in production.derivations:
+                pass # TODO
+
+    def __getitem__(self, item: tuple[str, str]) -> Derivation | None:
+        """The derivation to be produced if the current nonterminal is item[0] and the next terminal is item[1].
+
+        Raises ParserError if this is not a legal combination in the given grammar.
+        """
+        nonterminal, terminal = item
+        try:
+            return self._table[nonterminal, terminal]
+        except KeyError:
+            raise ParserError(f'The terminal {terminal} is not allowed to start a derivation of {nonterminal}')
 
 
 def _extend_set(target_set: set, to_add: set) -> bool:
