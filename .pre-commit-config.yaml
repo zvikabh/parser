@@ -12,6 +12,8 @@ repos:
       - id: mypy
         name: mypy
         entry: mypy
-        language: system
+        language: python
         types: [python]
+        additional_dependencies:
+          - mypy
         args: ["--config-file=pyproject.toml"]
