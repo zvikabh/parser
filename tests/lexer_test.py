@@ -5,7 +5,7 @@ import lexer
 
 class CreateLexerTest(unittest.TestCase):
 
-    def test_create_lexer_happy_flow(self):
+    def test_create_lexer_happy_flow(self) -> None:
         rules = r'''
             # Example comment
             Whitespace[emit=false]  r'\s+'
@@ -21,7 +21,7 @@ class CreateLexerTest(unittest.TestCase):
         expected_emit = [False, True, True, True, True]
         self.assertEqual(expected_emit, [token.emit for token in l._token_matchers])
 
-    def test_create_lexer_invalid_regex(self):
+    def test_create_lexer_invalid_regex(self) -> None:
         rules = r'''
             Whitespace  r'\s+'
             Float       '[0-'
@@ -29,7 +29,7 @@ class CreateLexerTest(unittest.TestCase):
         with self.assertRaisesRegex(lexer.LexerError, 'Invalid matching rule'):
             lexer.Lexer(rules)
 
-    def test_create_lexer_invalid_expression(self):
+    def test_create_lexer_invalid_expression(self) -> None:
         rules = r'''
             Whitespace  r'\s+'
             Float       0-9
@@ -40,7 +40,7 @@ class CreateLexerTest(unittest.TestCase):
 
 class LexerTokenizerTest(unittest.TestCase):
 
-    def test_parse_arithmetic(self):
+    def test_parse_arithmetic(self) -> None:
         l = lexer.Lexer(r'''
             WS         r"\s+"
             Number     r'[0-9]+(\.[0-9]*)?'
@@ -50,7 +50,7 @@ class LexerTokenizerTest(unittest.TestCase):
         self.assertEqual([token.value for token in tokens], ['5', '   ', '+', ' ', '7.5'])
         self.assertEqual([token.token_id for token in tokens], ['Number', 'WS', 'Operator', 'WS', 'Number'])
 
-    def test_parse_with_emit_false(self):
+    def test_parse_with_emit_false(self) -> None:
         l = lexer.Lexer(r'''
             WS[emit=false]   r'\s+'
             Identifier   r'[a-zA-Z][a-zA-Z0-9_]*'
@@ -60,7 +60,7 @@ class LexerTokenizerTest(unittest.TestCase):
         # Whitespace is not emitted.
         self.assertEqual([token.value for token in tokens], ['Root', '->', 'Foo', 'Bar', 'Baz'])
 
-    def test_fail_to_parse(self):
+    def test_fail_to_parse(self) -> None:
         l = lexer.Lexer(r'''
             WS[emit=false]   r'\s+'
             Identifier   r'[a-zA-Z][a-zA-Z0-9_]*'
