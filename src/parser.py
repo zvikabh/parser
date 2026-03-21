@@ -450,7 +450,7 @@ class _ParseProcessor:
             return self.tokens[self.cur_pos_in_tokens]
         return self.END_OF_INPUT
 
-    def parse(self) -> Node:
+    def parse(self) -> NonterminalNode:
         return self._parse_production('ROOT')
 
     def _parse_production(self, prod_id: str) -> NonterminalNode:
