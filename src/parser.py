@@ -4,6 +4,9 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
+import token
+from abc import abstractmethod
+from typing import Iterable
 
 import lexer
 from lexer import Lexer
@@ -30,7 +33,7 @@ class Grammar:
     """AST of the user-specified grammar."""
     productions_by_left_id: dict[str, Production]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.productions_by_left_id:
             raise ParserError("Expecting at least one production in the grammar")
         if "ROOT" not in self.productions_by_left_id:
@@ -59,7 +62,7 @@ class Production:
     left_id: str
     derivations: list[Derivation]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.derivations:
             raise ParserError(f"Expecting at least one derivation in production {self.left_id}")
         for i, deriv1 in enumerate(self.derivations):
@@ -95,7 +98,7 @@ def _parse_grammar(grammar: str) -> Grammar:
     return grammar_parser.parse_ROOT()
 
 
-def _ensure_grammar_lexer_consistency(lex: Lexer, grammar: Grammar):
+def _ensure_grammar_lexer_consistency(lex: Lexer, grammar: Grammar) -> None:
     token_ids_set = set(lex.emitted_token_ids)
     terminals_set = set(grammar.terminals)
     if orphaned_lexer_tokens := token_ids_set - terminals_set:
@@ -314,7 +317,9 @@ class _ParsingTable:
         # Map from nonterminal to derivations containing it.
         # Each entry in the value contains the production_id, derivation, and index in the derivation pointing to the
         # nonterminal.
-        nonterm_to_deriv = collections.defaultdict(list[tuple[str, Derivation, int]])
+        nonterm_to_deriv: dict[str, list[tuple[str, Derivation, int]]] = collections.defaultdict(
+            list[tuple[str, Derivation, int]]
+        )
         for prod_id, prod in self.grammar.productions_by_left_id.items():
             for deriv in prod.derivations:
                 for pos, term in enumerate(deriv.terms):
@@ -373,7 +378,7 @@ class _ParsingTable:
             )
         self._table[nonterm, terminal] = deriv
 
-    def __getitem__(self, item: tuple[str, str]) -> Derivation | None:
+    def __getitem__(self, item: tuple[str, str]) -> Derivation:
         """The derivation to be produced if the current nonterminal is item[0] and the next terminal is item[1].
 
         Raises ParserError if this is not a legal combination in the given grammar.
@@ -399,10 +404,85 @@ def _extend_set(target_set: set, to_add: set) -> bool:
     return len(target_set) > original_size
 
 
-@dataclasses.dataclass(frozen=True)
 class Node:
+    @abstractmethod
+    def pretty_print(self, depth: int = 0) -> str:
+        raise NotImplementedError()
+
+
+@dataclasses.dataclass(frozen=True)
+class NonterminalNode(Node):
+    prod_id: str
     children: list[Node]
-    token: lexer.Token | None = None  # Only for terminal nodes
+
+    def pretty_print(self, depth: int = 0) -> str:
+        s = '  ' * depth + self.prod_id + '\n'
+        for child in self.children:
+            s += child.pretty_print(depth + 1)
+        return s
+
+
+@dataclasses.dataclass(frozen=True)
+class TerminalNode(Node):
+    token: lexer.Token
+
+    def pretty_print(self, depth: int = 0) -> str:
+        return '  ' * depth + repr(self.token.value) + '\n'
+
+
+class _ParseProcessor:
+    """Internal class handling the state for a single call to Parser.parse()."""
+
+    END_OF_INPUT = lexer.Token(token_id='$', value='<end of input>', pos_start=-1, pos_end=-1)
+
+    def __init__(
+        self, lex: lexer.Lexer, grammar: Grammar, parsing_table: _ParsingTable, tokens: list[lexer.Token]
+    ) -> None:
+        self.lexer = lex
+        self.grammar = grammar
+        self.parsing_table = parsing_table
+        self.tokens = tokens
+        self.cur_pos_in_tokens = 0
+
+    @property
+    def token(self) -> lexer.Token:
+        if self.cur_pos_in_tokens < len(self.tokens):
+            return self.tokens[self.cur_pos_in_tokens]
+        return self.END_OF_INPUT
+
+    def parse(self) -> Node:
+        return self._parse_production('ROOT')
+
+    def _parse_production(self, prod_id: str) -> NonterminalNode:
+        child_nodes = list[Node]()
+        try:
+            deriv = self.parsing_table[prod_id, self.token.token_id]
+        except ParserError as ex:
+            ex.add_note(
+                f'While parsing token {self.token.value!r} of type {self.token.token_id} '
+                f'at position {self.token.pos_start}'
+            )
+            raise
+        for term in deriv.terms:
+            if term in self.grammar.terminals:
+                # Consume terminal token
+                if self.token.token_id != term:
+                    raise ParserError(
+                        f'While parsing production {prod_id}: Expected token of type {term}, got token '
+                        f'{self.token.value!r} of type {self.token.token_id} at position {self.token.pos_start}'
+                    )
+                child_nodes.append(TerminalNode(token=self.token))
+                self.cur_pos_in_tokens += 1
+            else:
+                sub_production = self._parse_production(term)
+                if term[-1] == '?' and sub_production.children:
+                    # Syntactic sugar: "Optional" productions (those ending in '?') are collapsed to their constituent,
+                    # to avoid unnecessarily inflating the AST.
+                    child_nodes.append(sub_production.children[0])
+                else:
+                    child_nodes.append(sub_production)
+
+        return NonterminalNode(prod_id=prod_id, children=child_nodes)
 
 
 class Parser:
@@ -435,4 +515,6 @@ class Parser:
         self.parsing_table = _ParsingTable(self.grammar)
 
     def parse(self, input: str) -> Node:
-        pass  # TODO
+        tokens = list(self.lexer.tokenize(input))
+        parse_processor = _ParseProcessor(self.lexer, self.grammar, self.parsing_table, tokens)
+        return parse_processor.parse()

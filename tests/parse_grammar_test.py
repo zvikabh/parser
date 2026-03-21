@@ -10,7 +10,7 @@ Derivation = parser.Derivation
 
 class ParseGrammarTest(unittest.TestCase):
 
-    def test_simple_grammar(self):
+    def test_simple_grammar(self) -> None:
         grammar_str = """
             ROOT -> Sum;
             Sum  -> NUMBER PLUS NUMBER
@@ -24,7 +24,7 @@ class ParseGrammarTest(unittest.TestCase):
             "Sum -> NUMBER PLUS NUMBER\n    | NUMBER MINUS NUMBER ;"
         )
 
-    def test_grammar_with_optional(self):
+    def test_grammar_with_optional(self) -> None:
         grammar_str = """
             ROOT -> LITERAL ROOT?;
             LITERAL -> LETTER ROOT?;
@@ -35,28 +35,28 @@ ROOT -> LITERAL ROOT? ;
 LITERAL -> LETTER ROOT? ;
 ROOT? -> ε\n    | ROOT ;""".strip())
 
-    def test_grammar_missing_semicolon(self):
+    def test_grammar_missing_semicolon(self) -> None:
         grammar_str = """
             ROOT -> LITERAL ROOT?
         """
         with self.assertRaisesRegex(parser.ParserError, "expected SEMICOLON"):
             parser._parse_grammar(grammar_str)
 
-    def test_grammar_missing_arrow(self):
+    def test_grammar_missing_arrow(self) -> None:
         grammar_str = """
             ROOT to LITERAL ROOT?
         """
         with self.assertRaisesRegex(parser.ParserError, "expected ARROW"):
             parser._parse_grammar(grammar_str)
 
-    def test_grammar_invalid_character(self):
+    def test_grammar_invalid_character(self) -> None:
         grammar_str = """
             ROOT -> Real-Number Operator Real-Number;
         """
         with self.assertRaisesRegex(parser.ParserError, "Failed to parse grammar"):
             parser._parse_grammar(grammar_str)
 
-    def test_grammar_must_have_root(self):
+    def test_grammar_must_have_root(self) -> None:
         grammar_str = '''
             Foo -> Bar;
             Bar -> NUMBER Bar?;
@@ -64,7 +64,7 @@ ROOT? -> ε\n    | ROOT ;""".strip())
         with self.assertRaisesRegex(parser.ParserError, "Grammar must have a `ROOT` node"):
             parser._parse_grammar(grammar_str)
 
-    def test_grammar_duplicate_simple(self):
+    def test_grammar_duplicate_simple(self) -> None:
         grammar_str = '''
             ROOT -> NUMBER | NUMBER;
         '''
@@ -74,21 +74,21 @@ ROOT? -> ε\n    | ROOT ;""".strip())
 
 class EnsureGrammarLexerConsistencyTest(unittest.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.lex = lexer.Lexer(r'''
             WS[emit=false]    r"\s+"
             Number            r'[0-9]+(\.[0-9]*)?'
             Operator          r'\+|\-|\*|\/'
         ''')
 
-    def test_happy_flow(self):
+    def test_happy_flow(self) -> None:
         grammar_str = '''
             ROOT -> Number Operator Number;
         '''
         grammar = parser._parse_grammar(grammar_str)
         parser._ensure_grammar_lexer_consistency(self.lex, grammar)
 
-    def test_orphaned_token(self):
+    def test_orphaned_token(self) -> None:
         grammar_str = '''
             ROOT -> Operator;
         '''
@@ -99,7 +99,7 @@ class EnsureGrammarLexerConsistencyTest(unittest.TestCase):
         ):
             parser._ensure_grammar_lexer_consistency(self.lex, grammar)
 
-    def test_orphaned_terminal(self):
+    def test_orphaned_terminal(self) -> None:
         grammar_str = '''
             ROOT -> Number Operator Number
                   | Sign Number;
@@ -114,7 +114,7 @@ class EnsureGrammarLexerConsistencyTest(unittest.TestCase):
 
 class ParsingTableFirstTerminalsTest(unittest.TestCase):
 
-    def test_simple(self):
+    def test_simple(self) -> None:
         grammar_str = '''
             ROOT -> LITERAL ROOT? 
                   | NUMBER ;
@@ -140,7 +140,7 @@ class ParsingTableFirstTerminalsTest(unittest.TestCase):
             }
         )
 
-    def test_complex(self):
+    def test_complex(self) -> None:
         grammar_str = '''
             ROOT -> Expr ;
             Expr -> NUMBER MoreTerms? ;
@@ -174,7 +174,7 @@ class ParsingTableFirstTerminalsTest(unittest.TestCase):
             }
         )
 
-    def test_more_complex(self):
+    def test_more_complex(self) -> None:
         grammar_str = '''
             ROOT -> EqSystem ;
             EqSystem -> Eq MoreEqs? ;
@@ -201,7 +201,7 @@ class ParsingTableFirstTerminalsTest(unittest.TestCase):
         self.assertEqual(parsing_table.first_terminals_for_nonterminal['VARNAME?'], {None, 'VARNAME'})
         self.assertEqual(parsing_table.first_terminals_for_nonterminal['SIGN?'], {None, 'SIGN'})
 
-    def test_invalid_grammar(self):
+    def test_invalid_grammar(self) -> None:
         grammar_str = '''
             ROOT -> Expr ;
             Expr -> Term MoreTerms? ;
@@ -215,7 +215,7 @@ class ParsingTableFirstTerminalsTest(unittest.TestCase):
 
 class ParsingTableFollowTerminalsTest(unittest.TestCase):
 
-    def test_simple(self):
+    def test_simple(self) -> None:
         grammar_str = '''
             ROOT -> Expr ;
             Expr -> NUMBER MoreTerms? ;
@@ -229,7 +229,7 @@ class ParsingTableFollowTerminalsTest(unittest.TestCase):
         self.assertEqual(parsing_table.follow_terminals['MoreTerms'], {None})
         self.assertEqual(parsing_table.follow_terminals['MoreTerms?'], {None})
 
-    def test_medium(self):
+    def test_medium(self) -> None:
         grammar_str = '''
             ROOT -> Expr ;
             Expr -> FirstTerm OtherTerms? ;
@@ -248,7 +248,7 @@ class ParsingTableFollowTerminalsTest(unittest.TestCase):
         self.assertEqual(parsing_table.follow_terminals['OtherTerms?'], {None})
         self.assertEqual(parsing_table.follow_terminals['VARNAME?'], {None, 'SIGN'})
 
-    def test_complex(self):
+    def test_complex(self) -> None:
         grammar_str = '''
             ROOT -> EqSystem ;
             EqSystem -> Eq MoreEqs? ;
@@ -278,7 +278,7 @@ class ParsingTableFollowTerminalsTest(unittest.TestCase):
 
 class ParsingTableTest(unittest.TestCase):
 
-    def test_simple(self):
+    def test_simple(self) -> None:
         grammar_str = '''
             ROOT -> Expr ;
             Expr -> NUMBER MoreTerms? ;
@@ -287,7 +287,7 @@ class ParsingTableTest(unittest.TestCase):
         grammar = parser._parse_grammar(grammar_str)
         parsing_table = parser._ParsingTable(grammar)
 
-        two_stage_parsing_table = collections.defaultdict(dict)
+        two_stage_parsing_table: dict[str, dict[str, parser.Derivation]] = collections.defaultdict(dict)
         for (nonterminal, terminal), deriv in parsing_table._table.items():
             two_stage_parsing_table[nonterminal][terminal] = deriv
 
@@ -318,7 +318,7 @@ class ParsingTableTest(unittest.TestCase):
             }
         )
 
-    def test_complex(self):
+    def test_complex(self) -> None:
         grammar_str = '''
             ROOT -> EqSystem ;
             EqSystem -> Eq MoreEqs? ;
@@ -332,7 +332,7 @@ class ParsingTableTest(unittest.TestCase):
         grammar = parser._parse_grammar(grammar_str)
         parsing_table = parser._ParsingTable(grammar)
 
-        two_stage_parsing_table = collections.defaultdict(dict)
+        two_stage_parsing_table: dict[str, dict[str, parser.Derivation]] = collections.defaultdict(dict)
         for (nonterminal, terminal), deriv in parsing_table._table.items():
             two_stage_parsing_table[nonterminal][terminal] = deriv
 
