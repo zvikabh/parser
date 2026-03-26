@@ -3,6 +3,7 @@ import unittest
 from parameterized import parameterized  # type: ignore[import-untyped]
 
 from examples import calculator
+import parser
 
 
 class CalculatorTest(unittest.TestCase):
@@ -18,6 +19,11 @@ class CalculatorTest(unittest.TestCase):
     def test_calculator(self, inp: str, expected: float) -> None:
         calc = calculator.Calculator()
         self.assertAlmostEqual(expected, calc.calc(inp))
+
+    def test_invalid_function(self) -> None:
+        calc = calculator.Calculator()
+        with self.assertRaisesRegex(parser.ParserError, "Unknown function: FOOBAR"):
+            calc.calc('foobar(5)')
 
 
 if __name__ == '__main__':
