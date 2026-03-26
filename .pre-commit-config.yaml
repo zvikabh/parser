@@ -16,4 +16,5 @@ repos:
         types: [python]
         additional_dependencies:
           - mypy
+          - parameterized
         args: ["--config-file=pyproject.toml"]
