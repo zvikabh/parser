@@ -36,6 +36,32 @@ class BasicInterpreterTest(unittest.TestCase):
         output = ''.join(runner.exec())
         self.assertEqual(output, "50\n")
 
+    def test_print_triangle(self) -> None:
+        program = '''
+            I = 1
+            10 J = 0
+            S = ""
+            20 S = S + "*"
+            J = J + 1
+            IF J < I THEN
+                GOTO 20
+            END IF
+            PRINT S
+            I = I + 1
+            IF I <= 5 THEN
+                GOTO 10
+            END IF
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, '''\
+*
+**
+***
+****
+*****
+''')
+
 
 if __name__ == '__main__':
     unittest.main()
