@@ -19,10 +19,12 @@ class TokenMatcher:
         id: Identifier for this matcher, e.g., `FloatConst`.
         regexp: Compiled regexp matching this token type.
         emit: If False, this token is identified but not emitted to the output token stream.
+        to_upper: If True, the value of the token will be converted to uppercase before being emitted.
     """
     id: str
     regexp: re.Pattern
     emit: bool
+    to_upper: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,11 +58,11 @@ class Lexer:
     Anything preceded by '#' is considered a comment and ignored.
 
     Example:
-    Whitespace[emit=false]  r'\s+'            # [emit=false] means that tokens of this type will be emitted
-    Float                   r'[0-9]\.[0-9]*'
-    Integer                 '[0-9]+'          # Only matches if Float did not match
-    String                  '"[^"]*"'
-    Identifier              "[a-zA-Z][a-zA-Z0-9_]*"
+    Whitespace[emit=false]     r'\s+'            # [emit=false] means that tokens of this type will be emitted
+    Float                      r'[0-9]\.[0-9]*'
+    Integer                    '[0-9]+'          # Only matches if Float did not match
+    String                     '"[^"]*"'
+    Identifier[to_upper=true]  "[a-zA-Z][a-zA-Z0-9_]*"
     """
 
     def __init__(self, lexer_def: str):
@@ -69,13 +71,14 @@ class Lexer:
             line = line.strip()
             if not line: continue
             if line[0] == '#': continue
-            m = re.match(r'([a-zA-Z][a-zA-Z0-9_]*)(\[emit=false\])?\s+(.+)$', line)
+            m = re.match(r'([a-zA-Z][a-zA-Z0-9_]*)(\[emit=false\])?(\[to_upper=true\])?\s+(.+)$', line)
             if not m:
                 raise LexerError(f'Invalid token identifier or matching rule in line {n_line + 1}')
             token_id = m.group(1)
             emit = m.group(2) is None
+            to_upper = m.group(3) is not None
             try:
-                parsed_matching_rule = ast.parse(m.group(3))
+                parsed_matching_rule = ast.parse(m.group(4))
                 assert len(parsed_matching_rule.body) == 1, 'Matching rule must contain a single string'
                 assert isinstance(parsed_matching_rule.body[0], ast.Expr), (
                     'Matching rule must be a valid Python expression')
@@ -86,7 +89,9 @@ class Lexer:
                 matching_rule_re = re.compile(matching_rule)
             except (SyntaxError, ValueError, AssertionError, re.PatternError) as e:
                 raise LexerError(f'Invalid matching rule in line {n_line + 1}') from e
-            self._token_matchers.append(TokenMatcher(id=token_id, regexp=matching_rule_re, emit=emit))
+            self._token_matchers.append(
+                TokenMatcher(id=token_id, regexp=matching_rule_re, emit=emit, to_upper=to_upper)
+            )
 
     @functools.cached_property
     def token_ids(self) -> list[str]:
@@ -102,8 +107,11 @@ class Lexer:
             for matcher in self._token_matchers:
                 if m := re.match(matcher.regexp, input[pos:]):
                     token_len = len(m.group(0))
+                    value = m.group(0)
+                    if matcher.to_upper:
+                        value = value.upper()
                     if matcher.emit:
-                        yield Token(token_id=matcher.id, value=m.group(0), pos_start=pos, pos_end=pos + token_len)
+                        yield Token(token_id=matcher.id, value=value, pos_start=pos, pos_end=pos + token_len)
                     pos += token_len
                     break
             else:
