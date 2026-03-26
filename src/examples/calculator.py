@@ -19,7 +19,7 @@ LEXER_RULES = r'''
 '''
 
 
-GRAMMAR = r'''
+GRAMMAR = '''
     ROOT      -> Expr;
     Expr      -> Expr2 MoreExpr?;
     MoreExpr  -> PREC_2_OPERATOR Expr;

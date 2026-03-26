@@ -127,7 +127,7 @@ class Lexer:
                     pos += token_len
                     break
             else:
-                raise LexerError(f"Failed to match any token at position {pos}, currently at: {input[pos:pos+10]}")
+                raise LexerError(f"Failed to match any token at position {pos}, currently at: <{input[pos:pos+10]}...>")
 
 
 def _parse_modifiers(modifiers: str) -> dict[str, bool]:
@@ -137,7 +137,7 @@ def _parse_modifiers(modifiers: str) -> dict[str, bool]:
         for modifier in modifier_list:
             mod_name, mod_value = modifier.split('=', 1)
             mod_name = mod_name.strip()
-            match mod_value.strip():
+            match mod_value.strip().lower():
                 case 'true':
                     actual_mod_value = True
                 case 'false':
