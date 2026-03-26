@@ -4,7 +4,7 @@ import ast
 import dataclasses
 import functools
 import re
-from typing import Iterator
+from typing import Iterator, Any
 
 
 class LexerError(Exception):
@@ -50,6 +50,11 @@ class Lexer:
     A token is defined by its identifier (a valid Python identifier) and its matching rule (a regexp enclosed in quotes
     or r'' quotes, with ordinary Python escaping).
     The token identifier is separated from the matching rule by whitespace.
+    The token identifier can optionally be followed by a sequence of one or more modifiers in brackets, separated by
+    commas, for example `[emit=false,ignore_case=true]`. Supported modifiers are:
+    - `emit`: if false, this token is processed but not emitted to the output token stream. (default: true)
+    - `to_upper`: if true, the token value is converted to uppercase before being emitted. (default: false)
+    - `ignore_case`: if true, the regexp is matched case-insensitively. (default: false)
     The token identifier can be followed by `[emit=false]`, in which case those tokens are processed by not emitted
     to the output token stream.
     Tokens are matched in the order appearing in the file (earlier tokens getting higher precedence).
@@ -71,12 +76,16 @@ class Lexer:
             line = line.strip()
             if not line: continue
             if line[0] == '#': continue
-            m = re.match(r'([a-zA-Z][a-zA-Z0-9_]*)(\[emit=false\])?(\[to_upper=true\])?\s+(.+)$', line)
+            m = re.match(r'([a-zA-Z][a-zA-Z0-9_]*)(\[(.*)\])?\s+(.+)$', line)
             if not m:
                 raise LexerError(f'Invalid token identifier or matching rule in line {n_line + 1}')
             token_id = m.group(1)
-            emit = m.group(2) is None
-            to_upper = m.group(3) is not None
+            try:
+                modifiers = _parse_modifiers(modifiers=m.group(3))
+            except LexerError as ex:
+                ex.add_note(f'While reading line {n_line + 1}')
+                raise
+
             try:
                 parsed_matching_rule = ast.parse(m.group(4))
                 assert len(parsed_matching_rule.body) == 1, 'Matching rule must contain a single string'
@@ -86,11 +95,14 @@ class Lexer:
                     'Matching rule must be a valid Python constant')
                 matching_rule = parsed_matching_rule.body[0].value.value
                 assert isinstance(matching_rule, str), 'Matching rule must be a quote-enclosed string'
-                matching_rule_re = re.compile(matching_rule)
+                re_flags = re.RegexFlag.IGNORECASE if modifiers['ignore_case'] else 0
+                matching_rule_re = re.compile(matching_rule, flags=re_flags)
             except (SyntaxError, ValueError, AssertionError, re.PatternError) as e:
                 raise LexerError(f'Invalid matching rule in line {n_line + 1}') from e
             self._token_matchers.append(
-                TokenMatcher(id=token_id, regexp=matching_rule_re, emit=emit, to_upper=to_upper)
+                TokenMatcher(
+                    id=token_id, regexp=matching_rule_re, emit=modifiers['emit'], to_upper=modifiers['to_upper']
+                )
             )
 
     @functools.cached_property
@@ -116,3 +128,24 @@ class Lexer:
                     break
             else:
                 raise LexerError(f"Failed to match any token at position {pos}, currently at: {input[pos:pos+10]}")
+
+
+def _parse_modifiers(modifiers: str) -> dict[str, bool]:
+    modifiers_dict = {'emit': True, 'to_upper': False, 'ignore_case': False}
+    if modifiers:
+        modifier_list = modifiers.split(',')
+        for modifier in modifier_list:
+            mod_name, mod_value = modifier.split('=', 1)
+            mod_name = mod_name.strip()
+            match mod_value.strip():
+                case 'true':
+                    actual_mod_value = True
+                case 'false':
+                    actual_mod_value = False
+                case _:
+                    raise LexerError(f'Invalid value [{mod_value}] for modifier [{mod_name}]')
+            if mod_name in modifiers_dict:
+                modifiers_dict[mod_name] = actual_mod_value
+            else:
+                raise LexerError(f'Invalid modifier [{mod_name}]')
+    return modifiers_dict
