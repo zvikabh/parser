@@ -33,7 +33,7 @@ LEXER_RULES = r'''
     LET[ignore_case=true]          r'LET\b'
     PRINT[ignore_case=true]        r'PRINT\b'
     THEN[ignore_case=true]         r'THEN\b'
-    FUNC_1ARG[ignore_case=true,to_upper=true]    r'(ABS|ATN|COS|EXP|INT|LEN|LOG|SGN|SIN|SQR|TAN)\b'
+    FUNC_1ARG[ignore_case=true,to_upper=true]    r'((ABS|ASC|ATN|COS|EXP|INT|LEN|LOG|SGN|SIN|SQR|TAN|VAL)\b)|((STR|CHR)\$)'
     VARNAME_STR[to_upper=true]     r'[A-Za-z][A-Za-z0-9_]*\$'
     # We neglect the distinction between integer and long integers, and treat them all as Python integers, which have
     # unlimited range.
@@ -97,7 +97,9 @@ OPERATOR_FUNCS: dict[str, tuple[type | tuple[type, ...], Callable[[Any, Any], An
 # Map from BASIC function name to tuple (allowed argument type(s), Python implementation).
 FUNC_1ARG_FUNCS: dict[str, tuple[type, Callable[[Any], Any]]] = {
     'ABS': (numbers.Number, lambda x: math.fabs(x)),
+    'ASC': (str, lambda x: ord(x[0])),
     'ATN': (numbers.Number, lambda x: math.atan(x)),
+    'CHR$': (numbers.Number, lambda x: chr(int(x))),
     'COS': (numbers.Number, lambda x: math.cos(x)),
     'EXP': (numbers.Number, lambda x: math.exp(x)),
     'INT': (numbers.Number, lambda x: int(x)),
@@ -106,7 +108,9 @@ FUNC_1ARG_FUNCS: dict[str, tuple[type, Callable[[Any], Any]]] = {
     'SGN': (numbers.Number, lambda x: 1 if x > 0 else -1 if x < 0 else 0),
     'SIN': (numbers.Number, lambda x: math.sin(x)),
     'SQR': (numbers.Number, lambda x: math.sqrt(x)),
+    'STR$': (numbers.Number, lambda x: str(x)),
     'TAN': (numbers.Number, lambda x: math.tan(x)),
+    'VAL': (str, lambda x: float(x)),
 }
 
 

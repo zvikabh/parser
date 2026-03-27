@@ -7,12 +7,19 @@ from examples import basic_interpreter
 class BasicInterpreterValidProgramsTest(unittest.TestCase):
 
     def test_hello_world(self) -> None:
-        program = '''
-            PRINT "Hello, world!"
-        '''
+        program = 'PRINT "Hello, world!"'
         runner = basic_interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, "Hello, world!\n")
+
+    def test_back_and_forth_conversion(self) -> None:
+        program = '''
+            print val(str$(4.5))
+            print chr$(asc("HELLO"))
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, "4.5\nH\n")
 
     def test_hello_world_5_times(self) -> None:
         program = '''
