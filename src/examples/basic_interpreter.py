@@ -4,7 +4,7 @@ import dataclasses
 import math
 import numbers
 import sys
-from typing import cast, Any, Callable, Iterable
+from typing import cast, Any, Callable, Iterable, SupportsFloat, SupportsRound
 
 import lexer
 import parser
@@ -34,7 +34,12 @@ LEXER_RULES = r'''
     PRINT[ignore_case=true]        r'PRINT\b'
     THEN[ignore_case=true]         r'THEN\b'
     FUNC_1ARG[ignore_case=true,to_upper=true]    r'(ABS|ATN|COS|EXP|INT|LEN|LOG|SGN|SIN|SQR|TAN)\b'
-    IDENTIFIER[to_upper=true]      r'[A-Za-z][A-Za-z0-9_]*'
+    VARNAME_STR[to_upper=true]     r'[A-Za-z][A-Za-z0-9_]*\$'
+    # We neglect the distinction between integer and long integers, and treat them all as Python integers, which have
+    # unlimited range.
+    VARNAME_INT[to_upper=true]     r'[A-Za-z][A-Za-z0-9_]*[\%\&]'
+    # We neglect the distinction between single and double precision floats, and treat them all as double-precision.
+    VARNAME_FLOAT[to_upper=true]   r'[A-Za-z][A-Za-z0-9_]*[\!\#]?'
 '''
 
 
@@ -46,7 +51,7 @@ GRAMMAR = '''
                       | GotoStatement
                       | PrintStatement
                       | IfStatement;
-    Assignment       -> LET? IDENTIFIER EQUALS Expr;
+    Assignment       -> LET? VarName EQUALS Expr;
     GotoStatement    -> GOTO LineNumber;
     PrintStatement   -> PRINT Expr;
     IfStatement      -> IF Expr THEN ROOT ElseClause? ENDIF;
@@ -64,28 +69,33 @@ GRAMMAR = '''
                       | PREC_2_OPERATOR Literal 
                       | LEFT_PAREN Expr RIGHT_PAREN
                       | FUNC_1ARG LEFT_PAREN Expr RIGHT_PAREN
-                      | IDENTIFIER;
+                      | VarName;
     Literal          -> FLOAT_CONST
                       | INTEGER_CONST
                       | STRING_LITERAL;
+    VarName          -> VARNAME_STR
+                      | VARNAME_INT
+                      | VARNAME_FLOAT;
 '''
 
 
-OPERATOR_FUNCS = {
-    '**': lambda x, y: x**y,
-    '*': lambda x, y: x*y,
-    '/': lambda x, y: x/y,
-    '+': lambda x, y: x+y,
-    '-': lambda x, y: x-y,
-    '=': lambda x, y: x==y,
-    '>': lambda x, y: x>y,
-    '<': lambda x, y: x<y,
-    '>=': lambda x, y: x>=y,
-    '<=': lambda x, y: x<=y,
+# Map from BASIC operator name to tuple (allowed argument type(s), Python implementation).
+OPERATOR_FUNCS: dict[str, tuple[type | tuple[type, ...], Callable[[Any, Any], Any]]] = {
+    '**': (numbers.Number, lambda x, y: x**y),
+    '*': (numbers.Number, lambda x, y: x*y),
+    '/': (numbers.Number, lambda x, y: x/y),
+    '+': ((str, numbers.Number), lambda x, y: x+y),
+    '-': (numbers.Number, lambda x, y: x-y),
+    '=': ((numbers.Number, str), lambda x, y: x==y),
+    '>': ((numbers.Number, str), lambda x, y: x>y),
+    '<': ((numbers.Number, str), lambda x, y: x<y),
+    '>=': ((numbers.Number, str), lambda x, y: x>=y),
+    '<=': ((numbers.Number, str), lambda x, y: x<=y),
 }
 
 
-FUNC_1ARG_FUNCS = {
+# Map from BASIC function name to tuple (allowed argument type(s), Python implementation).
+FUNC_1ARG_FUNCS: dict[str, tuple[type, Callable[[Any], Any]]] = {
     'ABS': (numbers.Number, lambda x: math.fabs(x)),
     'ATN': (numbers.Number, lambda x: math.atan(x)),
     'COS': (numbers.Number, lambda x: math.cos(x)),
@@ -98,6 +108,7 @@ FUNC_1ARG_FUNCS = {
     'SQR': (numbers.Number, lambda x: math.sqrt(x)),
     'TAN': (numbers.Number, lambda x: math.tan(x)),
 }
+
 
 def cast_ntn(node: parser.Node) -> parser.NonterminalNode:
     assert isinstance(node, parser.NonterminalNode)
@@ -122,17 +133,52 @@ class Statement:
 class AssignmentStatement(Statement):
     identifier: str
     expr: parser.NonterminalNode
+    type_coersion_fn: Callable[[Any], Any] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         assert self.expr.prod_id == 'Expr'
+        assert self.identifier
+        match self.identifier[-1]:
+            case '$':  # Assign to string
+                self.type_coersion_fn = self._coerce_to_str
+            case '%' | '&':  # Assign to int
+                self.type_coersion_fn = self._coerce_to_int
+            case _:  # Assign to float
+                self.type_coersion_fn = self._coerce_to_float
 
     def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
-        interpreter.variables[self.identifier] = interpreter.evaluate_expr(self.expr)
+        interpreter.variables[self.identifier] = self.type_coersion_fn(interpreter.evaluate_expr(self.expr))
         interpreter.cur_statement += 1
         yield from []  # To make Python recognize this as a generator
 
     def __str__(self) -> str:
         return f'{self.identifier} = {self.expr.children[0]}'
+
+    @classmethod
+    def _coerce_to_str(cls, rvalue: Any) -> str:
+        if not isinstance(rvalue, str):
+            raise BasicError(
+                f'Type mistmatch: Received value {rvalue!r} of type {type(rvalue).__name__}, expecting string'
+            )
+        return rvalue
+
+    @classmethod
+    def _coerce_to_int(cls, rvalue: Any) -> int:
+        if isinstance(rvalue, int):
+            return rvalue
+        if isinstance(rvalue, SupportsRound):
+            return int(round(rvalue))
+        raise BasicError(
+            f'Type mistmatch: Received value {rvalue!r} of type {type(rvalue).__name__}, expecting Number'
+        )
+
+    @classmethod
+    def _coerce_to_float(cls, rvalue: Any) -> float:
+        if not isinstance(rvalue, SupportsFloat):
+            raise BasicError(
+                f'Type mistmatch: Received value {rvalue!r} of type {type(rvalue).__name__}, expecting Number'
+            )
+        return float(rvalue)
 
 
 @dataclasses.dataclass
@@ -214,10 +260,10 @@ def _node_to_statement(act_stmt: parser.NonterminalNode) -> Iterable[Statement]:
     assert act_stmt.prod_id == 'ActualStatement'
     stmt = cast_ntn(act_stmt.children[0])
     match stmt.prod_id:
-        case 'Assignment':  # LET? IDENTIFIER EQUALS Expr
+        case 'Assignment':  # LET? VarName EQUALS Expr
             yield AssignmentStatement(
                 line_number=None,
-                identifier=cast_tn(stmt.children[1]).token.value,
+                identifier=cast_tn(cast_ntn(stmt.children[1]).children[0]).token.value,
                 expr=cast_ntn(stmt.children[3])
             )
         case 'GotoStatement':  # GOTO LineNumber
@@ -306,7 +352,7 @@ class BasicInterpreter:
                     return float(expr.token.value)
                 case 'STRING_LITERAL':
                     return expr.token.value[1:-1]
-                case 'IDENTIFIER':
+                case 'VARNAME_STR' | 'VARNAME_INT' | 'VARNAME_FLOAT':
                     identifier = expr.token.value
                     if identifier not in self.variables:
                         raise BasicError(f'Undefined variable: {identifier}')
@@ -328,8 +374,8 @@ class BasicInterpreter:
                         return self.evaluate_expr(node.children[1])
                     case 'PREC_2_OPERATOR':  # PREC_2_OPERATOR NUMBER
                         return self.evaluate_operator(0, node)
-                    case 'IDENTIFIER':  # IDENTIFIER
-                        return self.evaluate_expr(node.children[0])
+                    case 'VarName':
+                        return self.evaluate_expr(first_child)
                     case 'FUNC_1ARG':  # FUNC_1ARG LEFT_PAREN Expr RIGHT_PAREN
                         func_name = cast_tn(node.children[0]).token.value
                         reqd_type, fn = FUNC_1ARG_FUNCS[func_name]
@@ -342,7 +388,7 @@ class BasicInterpreter:
                         return fn(arg)
                     case _:
                         raise RuntimeError('Bug in the grammar!')
-            case 'Literal':
+            case 'VarName' | 'Literal':
                 return self.evaluate_expr(node.children[0])
             case _:
                 raise RuntimeError(f'Bug in the grammar: Unexpected node {node.prod_id}')
@@ -352,8 +398,18 @@ class BasicInterpreter:
             return left_value
         operator_node = cast_tn(maybe_operator_node.children[0])
         operator = operator_node.token.value
-        operator_fn: Callable[[float, float], float] = OPERATOR_FUNCS[operator]
+        allowed_types, operator_fn = OPERATOR_FUNCS[operator]
+        if not isinstance(left_value, allowed_types):
+            raise BasicError(
+                f'Type mistmatch in call to operator `{operator}`: Left argument {left_value!r} has type '
+                f'{type(left_value).__name__}, but operator requires {allowed_types}'
+            )
         right_value = self.evaluate_expr(maybe_operator_node.children[1])
+        if not isinstance(right_value, allowed_types):
+            raise BasicError(
+                f'Type mistmatch in call to operator `{operator}`: Right argument {right_value!r} has type '
+                f'{type(right_value).__name__}, but operator requires {allowed_types}'
+            )
         return operator_fn(left_value, right_value)
 
 

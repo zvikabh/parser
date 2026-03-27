@@ -32,10 +32,11 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
 
     def test_calculation(self) -> None:
         program = '''
-            IFFY = 5
-            ELSEY = IFFY * 2
-            10 PRINT IFFY * 2 + ELSEY * 4
+            IFFY% = 5.1
+            ELSEY% = IFFY% * 2
+            10 PRINT IFFY% * 2 + ELSEY% * 4
         '''
+        # Note that IFFY% is an integer, so 5.1 is rounded to 5
         runner = basic_interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, "50\n")
@@ -44,13 +45,13 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
         program = '''
             I = 1
             10 J = 0
-            S = ""
-            20 S = S + "*"
+            S$ = ""
+            20 S$ = S$ + "*"
             J = J + 1
             IF J < I THEN
                 GOTO 20
             END IF
-            PRINT S
+            PRINT S$
             I = I + 1
             IF I <= 5 THEN
                 GOTO 10
@@ -68,21 +69,21 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
 
     def test_calc_primes(self) -> None:
         program = '''
-            let n = 2
-            10 div = 2
-            20 if div > sqr(n) then goto 40 end if
-            mult = div
-            30 if mult = n then goto 50 end if
-            if mult > n then
-                div = div + 1
+            let n% = 2
+            10 div% = 2
+            20 if div% > sqr(n%) then goto 40 end if
+            mult% = div%
+            30 if mult% = n% then goto 50 end if
+            if mult% > n% then
+                div% = div% + 1
                 goto 20
             else
-                mult = mult + div
+                mult% = mult% + div%
                 goto 30
             end if
-            40 print n
-            50 n = n + 1
-            if n < 20 then goto 10 end if
+            40 print n%
+            50 n% = n% + 1
+            if n% < 20 then goto 10 end if
         '''
         runner = basic_interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
@@ -124,6 +125,15 @@ class BasicInterpreterInvalidCodeTest(unittest.TestCase):
         runner = basic_interpreter.BasicInterpreter(program)
         with self.assertRaisesRegex(basic_interpreter.BasicError, 'GOTO specified an invalid target line number 10'):
             list(runner.exec())
+
+    def test_type_mismatch(self) -> None:
+        program = 'LET S = "foo"'
+        runner = basic_interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(
+            basic_interpreter.BasicError, 'Type mistmatch: Received value \'foo\' of type str, expecting Number'
+        ):
+            list(runner.exec())
+
 
 
 if __name__ == '__main__':
