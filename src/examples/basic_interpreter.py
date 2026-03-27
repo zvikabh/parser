@@ -78,12 +78,22 @@ OPERATOR_FUNCS = {
 }
 
 
+def cast_ntn(node: parser.Node) -> parser.NonterminalNode:
+    assert isinstance(node, parser.NonterminalNode)
+    return node
+
+
+def cast_tn(node: parser.Node) -> parser.TerminalNode:
+    assert isinstance(node, parser.TerminalNode)
+    return node
+
+
 def _extract_statements(ast: parser.NonterminalNode) -> Iterable[parser.NonterminalNode]:
     while ast.children:
-        stmt = cast(parser.NonterminalNode, ast.children[0])
+        stmt = cast_ntn(ast.children[0])
         assert stmt.prod_id == 'Statement'
         yield stmt
-        ast = cast(parser.NonterminalNode, ast.children[1])
+        ast = cast_ntn(ast.children[1])
 
 
 class BasicInterpreter:
@@ -91,7 +101,7 @@ class BasicInterpreter:
     def __init__(self, prog: str) -> None:
         lex = lexer.Lexer(LEXER_RULES)
         self.parser = parser.Parser(lex, GRAMMAR)
-        ast = cast(parser.NonterminalNode, self.parser.parse(prog))
+        ast = cast_ntn(self.parser.parse(prog))
         self.statements = list(_extract_statements(ast))
         self.line_number_to_stmt_index = self._extract_line_numbers_to_stmt_indices()
         self.variables = dict[str, Any]()
@@ -108,31 +118,31 @@ class BasicInterpreter:
                 raise ex
 
     def exec_statement(self, stmt: parser.NonterminalNode) -> Iterable[str]:
-        stmt = cast(parser.NonterminalNode, stmt.children[1])
+        stmt = cast_ntn(stmt.children[1])
         assert stmt.prod_id == 'ActualStatement'
-        stmt = cast(parser.NonterminalNode, stmt.children[0])
+        stmt = cast_ntn(stmt.children[0])
         match stmt.prod_id:
             case 'Assignment':  # IDENTIFIER EQUALS Expr
-                identifier = cast(parser.TerminalNode, stmt.children[0]).token.value
-                self.variables[identifier] = self.evaluate_expr(cast(parser.NonterminalNode, stmt.children[2]))
+                identifier = cast_tn(stmt.children[0]).token.value
+                self.variables[identifier] = self.evaluate_expr(cast_ntn(stmt.children[2]))
             case 'GotoStatement':  # GOTO LineNumber
-                line_number_node = cast(parser.NonterminalNode, stmt.children[1])
-                line_number_terminal_node = cast(parser.TerminalNode, line_number_node.children[0])
+                line_number_node = cast_ntn(stmt.children[1])
+                line_number_terminal_node = cast_tn(line_number_node.children[0])
                 line_number = int(line_number_terminal_node.token.value)
                 if line_number not in self.line_number_to_stmt_index:
                     raise BasicError(f'GOTO specified an invalid target line number {line_number}')
                 self.cur_statement = self.line_number_to_stmt_index[line_number]
                 self.cur_statement -= 1  # To counteract +1 at end of loop
             case 'PrintStatement':  # PRINT Expr
-                yield f'{self.evaluate_expr(cast(parser.NonterminalNode, stmt.children[1]))}\n'
+                yield f'{self.evaluate_expr(cast_ntn(stmt.children[1]))}\n'
             case 'IfStatement':  # IF Expr THEN Statement ElseClause?
-                condition = self.evaluate_expr(cast(parser.NonterminalNode, stmt.children[1]))
-                else_clause = cast(parser.NonterminalNode, stmt.children[4])
+                condition = self.evaluate_expr(cast_ntn(stmt.children[1]))
+                else_clause = cast_ntn(stmt.children[4])
                 if condition:
-                    yield from self.exec_statement(cast(parser.NonterminalNode, stmt.children[3]))
+                    yield from self.exec_statement(cast_ntn(stmt.children[3]))
                     self.cur_statement -= 1  # To countact +1 inside the inner call
                 elif else_clause.prod_id == 'ElseClause':
-                    self.exec_statement(cast(parser.NonterminalNode, else_clause.children[1]))
+                    self.exec_statement(cast_ntn(else_clause.children[1]))
                     self.cur_statement -= 1  # To countact +1 inside the inner call
             case _:
                 raise BasicError(f'Unknown statement type: {stmt.prod_id}')
@@ -155,15 +165,15 @@ class BasicInterpreter:
                 case _:
                     raise BasicError(f'Unexpected terminal node of type {expr.token.token_id} when parsing expression')
 
-        node = cast(parser.NonterminalNode, expr)
+        node = cast_ntn(expr)
         match node.prod_id:
             case 'Expr' | 'Expr3' | 'Expr2' | 'Expr1':
                 left_value = self.evaluate_expr(node.children[0])
-                return self.evaluate_operator(left_value, cast(parser.NonterminalNode, node.children[1]))
+                return self.evaluate_operator(left_value, cast_ntn(node.children[1]))
             case 'Expr0':
                 if len(node.children) == 1:
                     return self.evaluate_expr(node.children[0])
-                first_child = cast(parser.TerminalNode, node.children[0])
+                first_child = cast_tn(node.children[0])
                 if first_child.token.token_id == 'LEFT_PAREN':
                     # LEFT_PAREN Expr RIGHT_PAREN
                     return self.evaluate_expr(node.children[1])
@@ -183,7 +193,7 @@ class BasicInterpreter:
     def evaluate_operator(self, left_value: Any, maybe_operator_node: parser.NonterminalNode) -> Any:
         if not maybe_operator_node.children:
             return left_value
-        operator_node = cast(parser.TerminalNode, maybe_operator_node.children[0])
+        operator_node = cast_tn(maybe_operator_node.children[0])
         operator = operator_node.token.value
         operator_fn: Callable[[float, float], float] = OPERATOR_FUNCS[operator]
         right_value = self.evaluate_expr(maybe_operator_node.children[1])
@@ -195,9 +205,9 @@ class BasicInterpreter:
         line_number_to_stmt_index = dict[int, int]()
         for idx, stmt in enumerate(self.statements):
             assert stmt.prod_id == 'Statement'
-            first_child = cast(parser.NonterminalNode, stmt.children[0])
+            first_child = cast_ntn(stmt.children[0])
             if first_child.prod_id == 'LineNumber':
-                line_number_terminal_node = cast(parser.TerminalNode, first_child.children[0])
+                line_number_terminal_node = cast_tn(first_child.children[0])
                 line_number = int(line_number_terminal_node.token.value)
                 if line_number in line_number_to_stmt_index:
                     raise BasicError(
