@@ -69,7 +69,7 @@ class BasicInterpreterTest(unittest.TestCase):
         program = '''
             n = 2
             10 div = 2
-            20 if div >= n then goto 40 end if
+            20 if div > sqr(n) then goto 40 end if
             mult = div
             30 if mult = n then goto 50 end if
             if mult > n then

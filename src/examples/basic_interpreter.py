@@ -1,6 +1,8 @@
 """Interpreter for a simple version of the BASIC programming language."""
 from __future__ import annotations
 import dataclasses
+import math
+import numbers
 import sys
 from typing import cast, Any, Callable, Iterable
 
@@ -30,6 +32,7 @@ LEXER_RULES = r'''
     THEN[ignore_case=true]         r'THEN\b'
     ELSE[ignore_case=true]         r'ELSE\b'
     ENDIF[ignore_case=true]        r'END\s+IF\b'
+    FUNC_1ARG[ignore_case=true,to_upper=true]    r'(ABS|ATN|COS|EXP|INT|LEN|LOG|SGN|SIN|SQR|TAN)\b'
     IDENTIFIER[to_upper=true]      r'[A-Za-z][A-Za-z0-9_]*'
 '''
 
@@ -58,7 +61,8 @@ GRAMMAR = '''
     MoreExpr1        -> PREC_0_OPERATOR Expr1;
     Expr0            -> Literal
                       | PREC_2_OPERATOR Literal 
-                      | LEFT_PAREN Expr RIGHT_PAREN 
+                      | LEFT_PAREN Expr RIGHT_PAREN
+                      | FUNC_1ARG LEFT_PAREN Expr RIGHT_PAREN
                       | IDENTIFIER;
     Literal          -> FLOAT_CONST
                       | INTEGER_CONST
@@ -79,6 +83,20 @@ OPERATOR_FUNCS = {
     '<=': lambda x, y: x<=y,
 }
 
+
+FUNC_1ARG_FUNCS = {
+    'ABS': (numbers.Number, lambda x: math.fabs(x)),
+    'ATN': (numbers.Number, lambda x: math.atan(x)),
+    'COS': (numbers.Number, lambda x: math.cos(x)),
+    'EXP': (numbers.Number, lambda x: math.exp(x)),
+    'INT': (numbers.Number, lambda x: int(x)),
+    'LEN': (str, lambda x: str(x)),
+    'LOG': (numbers.Number, lambda x: math.log(x)),
+    'SGN': (numbers.Number, lambda x: 1 if x > 0 else -1 if x < 0 else 0),
+    'SIN': (numbers.Number, lambda x: math.sin(x)),
+    'SQR': (numbers.Number, lambda x: math.sqrt(x)),
+    'TAN': (numbers.Number, lambda x: math.tan(x)),
+}
 
 def cast_ntn(node: parser.Node) -> parser.NonterminalNode:
     assert isinstance(node, parser.NonterminalNode)
@@ -278,37 +296,6 @@ class BasicInterpreter:
                 ex.add_note(f'While processing statement number {self.cur_statement+1}')
                 raise ex
 
-    def exec_statement(self, stmt: parser.NonterminalNode) -> Iterable[str]:
-        stmt = cast_ntn(stmt.children[1])
-        assert stmt.prod_id == 'ActualStatement'
-        stmt = cast_ntn(stmt.children[0])
-        match stmt.prod_id:
-            case 'Assignment':  # IDENTIFIER EQUALS Expr
-                identifier = cast_tn(stmt.children[0]).token.value
-                self.variables[identifier] = self.evaluate_expr(cast_ntn(stmt.children[2]))
-            case 'GotoStatement':  # GOTO LineNumber
-                line_number_node = cast_ntn(stmt.children[1])
-                line_number_terminal_node = cast_tn(line_number_node.children[0])
-                line_number = int(line_number_terminal_node.token.value)
-                if line_number not in self.line_number_to_stmt_index:
-                    raise BasicError(f'GOTO specified an invalid target line number {line_number}')
-                self.cur_statement = self.line_number_to_stmt_index[line_number]
-                self.cur_statement -= 1  # To counteract +1 at end of loop
-            case 'PrintStatement':  # PRINT Expr
-                yield f'{self.evaluate_expr(cast_ntn(stmt.children[1]))}\n'
-            case 'IfStatement':  # IF Expr THEN Statement ElseClause?
-                condition = self.evaluate_expr(cast_ntn(stmt.children[1]))
-                else_clause = cast_ntn(stmt.children[4])
-                if condition:
-                    yield from self.exec_statement(cast_ntn(stmt.children[3]))
-                    self.cur_statement -= 1  # To countact +1 inside the inner call
-                elif else_clause.prod_id == 'ElseClause':
-                    self.exec_statement(cast_ntn(else_clause.children[1]))
-                    self.cur_statement -= 1  # To countact +1 inside the inner call
-            case _:
-                raise BasicError(f'Unknown statement type: {stmt.prod_id}')
-        self.cur_statement += 1
-
     def evaluate_expr(self, expr: parser.Node) -> Any:
         if isinstance(expr, parser.TerminalNode):
             match expr.token.token_id:
@@ -335,17 +322,25 @@ class BasicInterpreter:
                 if len(node.children) == 1:
                     return self.evaluate_expr(node.children[0])
                 first_child = cast_tn(node.children[0])
-                if first_child.token.token_id == 'LEFT_PAREN':
-                    # LEFT_PAREN Expr RIGHT_PAREN
-                    return self.evaluate_expr(node.children[1])
-                elif first_child.token.token_id == 'PREC_2_OPERATOR':
-                    # PREC_2_OPERATOR NUMBER
-                    return self.evaluate_operator(0, node)
-                elif first_child.token.token_id == 'IDENTIFIER':
-                    # IDENTIFIER
-                    return self.evaluate_expr(node.children[0])
-                else:
-                    raise RuntimeError('Bug in the grammar!')
+                match first_child.token.token_id:
+                    case 'LEFT_PAREN':  # LEFT_PAREN Expr RIGHT_PAREN
+                        return self.evaluate_expr(node.children[1])
+                    case 'PREC_2_OPERATOR':  # PREC_2_OPERATOR NUMBER
+                        return self.evaluate_operator(0, node)
+                    case 'IDENTIFIER':  # IDENTIFIER
+                        return self.evaluate_expr(node.children[0])
+                    case 'FUNC_1ARG':  # FUNC_1ARG LEFT_PAREN Expr RIGHT_PAREN
+                        func_name = cast_tn(node.children[0]).token.value
+                        reqd_type, fn = FUNC_1ARG_FUNCS[func_name]
+                        arg = self.evaluate_expr(node.children[2])
+                        if not isinstance(arg, reqd_type):
+                            raise BasicError(
+                                f'Argument to function {func_name} must be of type {reqd_type}, '
+                                f'but received value {arg!r} of type {type(arg)}'
+                            )
+                        return fn(arg)
+                    case _:
+                        raise RuntimeError('Bug in the grammar!')
             case 'Literal':
                 return self.evaluate_expr(node.children[0])
             case _:
