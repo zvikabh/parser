@@ -1,4 +1,6 @@
 """Interpreter for a simple version of the BASIC programming language."""
+from __future__ import annotations
+import dataclasses
 import sys
 from typing import cast, Any, Callable, Iterable
 
@@ -43,8 +45,8 @@ GRAMMAR = '''
     Assignment       -> IDENTIFIER EQUALS Expr;
     GotoStatement    -> GOTO LineNumber;
     PrintStatement   -> PRINT Expr;
-    IfStatement      -> IF Expr THEN Statement ElseClause? ENDIF;
-    ElseClause       -> ELSE Statement;
+    IfStatement      -> IF Expr THEN ROOT ElseClause? ENDIF;
+    ElseClause       -> ELSE ROOT;
     Expr             -> Expr3 MoreExpr?;
     MoreExpr         -> PREC_3_OPERATOR Expr
                       | EQUALS Expr;
@@ -88,11 +90,170 @@ def cast_tn(node: parser.Node) -> parser.TerminalNode:
     return node
 
 
-def _extract_statements(ast: parser.NonterminalNode) -> Iterable[parser.NonterminalNode]:
+@dataclasses.dataclass
+class Statement:
+    """Base class for all statement types."""
+    line_number: int | None
+
+    def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
+        raise NotImplementedError()
+
+
+@dataclasses.dataclass
+class AssignmentStatement(Statement):
+    identifier: str
+    expr: parser.NonterminalNode
+
+    def __post_init__(self) -> None:
+        assert self.expr.prod_id == 'Expr'
+
+    def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
+        interpreter.variables[self.identifier] = interpreter.evaluate_expr(self.expr)
+        interpreter.cur_statement += 1
+        yield from []  # To make Python recognize this as a generator
+
+    def __str__(self) -> str:
+        return f'{self.identifier} = {self.expr.children[0]}'
+
+
+@dataclasses.dataclass
+class GotoStatement(Statement):
+    target_line: int
+
+    def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
+        if self.target_line not in interpreter.line_number_to_stmt_index:
+            raise BasicError(f'GOTO specified an invalid target line number {self.target_line}')
+        interpreter.cur_statement = interpreter.line_number_to_stmt_index[self.target_line]
+        yield from []  # To make Python recognize this as a generator
+
+    def __str__(self) -> str:
+        return f'GOTO {self.target_line}'
+
+
+@dataclasses.dataclass
+class IfStatement(Statement):
+    """A simplified IF statement, compiled from BASIC IF into essentially a JZ-like instruction.
+
+    Attributes:
+        condition: Node which will be evaluated to determine whether to jump.
+        relative_jump: Relative number of statements to jump if the condition is FALSY.
+            A value of 0 is the same as no-jump, causing the behavior to be identical regardless of the value of
+            `condition`.
+            A value of 1 will skip the next statement.
+            A value of -1 will cause the If statement to be re-evalauted (likely resulting in an infinite loop).
+    """
+    condition: parser.NonterminalNode
+    relative_jump_if_falsy: int
+
+    def __post_init__(self) -> None:
+        assert self.condition.prod_id == 'Expr'
+
+    def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
+        condition = interpreter.evaluate_expr(self.condition)
+        if condition:
+            interpreter.cur_statement += 1
+        else:
+            interpreter.cur_statement += self.relative_jump_if_falsy + 1
+        yield from []
+
+    def __str__(self) -> str:
+        return f'TEST {self.condition.children[0]}\nJZ REL {self.relative_jump_if_falsy}'
+
+
+@dataclasses.dataclass
+class PrintStatement(Statement):
+    expr: parser.NonterminalNode
+
+    def __post_init__(self) -> None:
+        assert self.expr.prod_id == 'Expr'
+
+    def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
+        interpreter.cur_statement += 1
+        yield f'{interpreter.evaluate_expr(self.expr)}\n'
+
+    def __str__(self) -> str:
+        return f'PRINT {self.expr.children[0]}'
+
+
+@dataclasses.dataclass
+class RelativeJumpStatement(Statement):
+    """An internal statement, used when compiling flow control statements.
+
+    See `IfStatement` for definition and example uses of `relative_jump`.
+    """
+    relative_jump: int
+
+    def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
+        interpreter.cur_statement += self.relative_jump + 1
+        yield from []
+
+    def __str__(self) -> str:
+        return f'RELJMP {self.relative_jump}'
+
+
+def _node_to_statement(act_stmt: parser.NonterminalNode) -> Iterable[Statement]:
+    assert act_stmt.prod_id == 'ActualStatement'
+    stmt = cast_ntn(act_stmt.children[0])
+    match stmt.prod_id:
+        case 'Assignment':  # IDENTIFIER EQUALS Expr
+            yield AssignmentStatement(
+                line_number=None,
+                identifier=cast_tn(stmt.children[0]).token.value,
+                expr=cast_ntn(stmt.children[2])
+            )
+        case 'GotoStatement':  # GOTO LineNumber
+            target_line_node = cast_ntn(stmt.children[1])
+            target_line_terminal_node = cast_tn(target_line_node.children[0])
+            target_line = int(target_line_terminal_node.token.value)
+            yield GotoStatement(line_number=None, target_line=target_line)
+        case 'PrintStatement':  # PRINT Expr
+            yield PrintStatement(line_number=None, expr=cast_ntn(stmt.children[1]))
+        case 'IfStatement':  # IF Expr THEN Statement ElseClause?
+            then_stmts = list(_extract_statements(cast_ntn(stmt.children[3])))
+            else_clause = cast_ntn(stmt.children[4])
+            if else_clause.prod_id != 'ElseClause':
+                # Compiled statements layout, with statement numbers relative to current statement
+                # (where T = len(then_stmts)):
+                # 0:    IF (else skip T statements)
+                # 1..T: THEN statements
+                # T+1:  Subsequent statements
+                yield IfStatement(
+                    line_number=None,
+                    condition=cast_ntn(stmt.children[1]),
+                    relative_jump_if_falsy=len(then_stmts)
+                )
+                yield from then_stmts
+            else:
+                else_stmts = list(_extract_statements(cast_ntn(else_clause.children[1])))
+                # Compiled statements layout, with statement numbers relative to current statement
+                # (where T = len(then_stmts), E = len(else_stmts)):
+                # 0:           IF (else skip T+1 statements)
+                # 1..T:        THEN statements
+                # T+1:         skip E statements
+                # T+2..T+E+1:  Subsequent statements
+                yield IfStatement(
+                    line_number=None,
+                    condition=cast_ntn(stmt.children[1]),
+                    relative_jump_if_falsy=len(then_stmts) + 1
+                )
+                yield from then_stmts
+                yield RelativeJumpStatement(line_number=None, relative_jump=len(else_stmts))
+                yield from else_stmts
+
+        case _:
+            raise BasicError(f'Unknown statement type: {stmt.prod_id}')
+
+
+def _extract_statements(ast: parser.NonterminalNode) -> Iterable[Statement]:
     while ast.children:
         stmt = cast_ntn(ast.children[0])
         assert stmt.prod_id == 'Statement'
-        yield stmt
+        substatements = list(_node_to_statement(cast_ntn(stmt.children[1])))
+        line_number_node = cast_ntn(stmt.children[0])
+        if line_number_node.prod_id == 'LineNumber':
+            line_number_terminal_node = cast_tn(line_number_node.children[0])
+            substatements[0].line_number = int(line_number_terminal_node.token.value)
+        yield from substatements
         ast = cast_ntn(ast.children[1])
 
 
@@ -111,8 +272,8 @@ class BasicInterpreter:
         self.cur_statement = 0
         while self.cur_statement < len(self.statements):
             try:
-                stmt = self.statements[self.cur_statement]  # LineNumber? ActualStatement
-                yield from self.exec_statement(stmt)
+                stmt = self.statements[self.cur_statement]
+                yield from stmt.exec(self)
             except BasicError as ex:
                 ex.add_note(f'While processing statement number {self.cur_statement+1}')
                 raise ex
@@ -204,17 +365,13 @@ class BasicInterpreter:
         """Returns a map from BASIC "Line Number" to the statement index to which it refers."""
         line_number_to_stmt_index = dict[int, int]()
         for idx, stmt in enumerate(self.statements):
-            assert stmt.prod_id == 'Statement'
-            first_child = cast_ntn(stmt.children[0])
-            if first_child.prod_id == 'LineNumber':
-                line_number_terminal_node = cast_tn(first_child.children[0])
-                line_number = int(line_number_terminal_node.token.value)
-                if line_number in line_number_to_stmt_index:
+            if stmt.line_number is not None:
+                if stmt.line_number in line_number_to_stmt_index:
                     raise BasicError(
-                        f'Error: Statements {line_number_to_stmt_index[line_number]} and {idx} both have '
-                        f'the line number {line_number}'
+                        f'Error: Statements {line_number_to_stmt_index[stmt.line_number]} and {idx} both have '
+                        f'the line number {stmt.line_number}'
                     )
-                line_number_to_stmt_index[line_number] = idx
+                line_number_to_stmt_index[stmt.line_number] = idx
 
         return line_number_to_stmt_index
 

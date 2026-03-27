@@ -20,11 +20,14 @@ class BasicInterpreterTest(unittest.TestCase):
             I = I + 1
             IF I < 5 THEN 
                 GOTO 10
+            ELSE
+                PRINT "That's all, folks!"
+                PRINT "The end"
             END IF
         '''
         runner = basic_interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
-        self.assertEqual(output, "Hello, world!\n"*5)
+        self.assertEqual(output, "Hello, world!\n"*5 + "That's all, folks!\nThe end\n")
 
     def test_calculation(self) -> None:
         program = '''
