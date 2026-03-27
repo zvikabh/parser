@@ -336,8 +336,8 @@ class BasicInterpreter:
                         arg = self.evaluate_expr(node.children[2])
                         if not isinstance(arg, reqd_type):
                             raise BasicError(
-                                f'Argument to function {func_name} must be of type {reqd_type}, '
-                                f'but received value {arg!r} of type {type(arg)}'
+                                f'Argument to function {func_name} must be of type {reqd_type.__name__}, '
+                                f'but received value {arg!r} of type {type(arg).__name__}'
                             )
                         return fn(arg)
                     case _:

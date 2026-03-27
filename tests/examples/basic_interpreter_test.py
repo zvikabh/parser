@@ -1,9 +1,10 @@
 import unittest
 
+import parser
 from examples import basic_interpreter
 
 
-class BasicInterpreterTest(unittest.TestCase):
+class BasicInterpreterValidProgramsTest(unittest.TestCase):
 
     def test_hello_world(self) -> None:
         program = '''
@@ -95,6 +96,34 @@ class BasicInterpreterTest(unittest.TestCase):
 17
 19
 ''')
+
+
+class BasicInterpreterInvalidCodeTest(unittest.TestCase):
+
+    def test_expected_number(self) -> None:
+        program = 'PRINT ABS("one")'
+        runner = basic_interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(basic_interpreter.BasicError, 'Argument to function ABS must be of type Number'):
+            list(runner.exec())
+
+    def test_expected_string(self) -> None:
+        program = 'PRINT LEN(3000)'
+        runner = basic_interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(basic_interpreter.BasicError, 'Argument to function LEN must be of type str'):
+            list(runner.exec())
+
+    def test_missing_end_if(self) -> None:
+        program = 'IF 2 > 1 THEN GOTO 10'
+        with self.assertRaisesRegex(
+            parser.ParserError, r'The terminal \$ is not allowed to start a derivation of ElseClause\?'
+        ):
+            basic_interpreter.BasicInterpreter(program)
+
+    def test_missing_line_number(self) -> None:
+        program = 'IF 2 > 1 THEN GOTO 10 END IF'
+        runner = basic_interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(basic_interpreter.BasicError, 'GOTO specified an invalid target line number 10'):
+            list(runner.exec())
 
 
 if __name__ == '__main__':
