@@ -141,6 +141,24 @@ class BasicInterpreterInvalidCodeTest(unittest.TestCase):
         ):
             list(runner.exec())
 
+    def test_type_mismatch_in_func(self) -> None:
+        program = 'PRINT ASC(5)'
+        runner = basic_interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(
+            basic_interpreter.BasicError,
+            'Argument to function ASC must be of type str, but received value 5 of type int'
+        ):
+            list(runner.exec())
+
+    def test_type_mismatch_in_operator(self) -> None:
+        program = 'PRINT "A" * 4'
+        runner = basic_interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(
+            basic_interpreter.BasicError,
+            'Type mistmatch in call to operator `\\*`: Left argument \'A\' has type str'
+        ):
+            list(runner.exec())
+
 
 
 if __name__ == '__main__':
