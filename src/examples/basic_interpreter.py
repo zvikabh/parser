@@ -26,12 +26,13 @@ LEXER_RULES = r'''
     LEFT_PAREN                     r'\('
     RIGHT_PAREN                    r'\)'
     EQUALS                         r'='
-    GOTO[ignore_case=true]         r'GOTO\b'
-    PRINT[ignore_case=true]        r'PRINT\b'
-    IF[ignore_case=true]           r'IF\b'
-    THEN[ignore_case=true]         r'THEN\b'
     ELSE[ignore_case=true]         r'ELSE\b'
     ENDIF[ignore_case=true]        r'END\s+IF\b'
+    GOTO[ignore_case=true]         r'GOTO\b'
+    IF[ignore_case=true]           r'IF\b'
+    LET[ignore_case=true]          r'LET\b'
+    PRINT[ignore_case=true]        r'PRINT\b'
+    THEN[ignore_case=true]         r'THEN\b'
     FUNC_1ARG[ignore_case=true,to_upper=true]    r'(ABS|ATN|COS|EXP|INT|LEN|LOG|SGN|SIN|SQR|TAN)\b'
     IDENTIFIER[to_upper=true]      r'[A-Za-z][A-Za-z0-9_]*'
 '''
@@ -45,7 +46,7 @@ GRAMMAR = '''
                       | GotoStatement
                       | PrintStatement
                       | IfStatement;
-    Assignment       -> IDENTIFIER EQUALS Expr;
+    Assignment       -> LET? IDENTIFIER EQUALS Expr;
     GotoStatement    -> GOTO LineNumber;
     PrintStatement   -> PRINT Expr;
     IfStatement      -> IF Expr THEN ROOT ElseClause? ENDIF;
@@ -213,11 +214,11 @@ def _node_to_statement(act_stmt: parser.NonterminalNode) -> Iterable[Statement]:
     assert act_stmt.prod_id == 'ActualStatement'
     stmt = cast_ntn(act_stmt.children[0])
     match stmt.prod_id:
-        case 'Assignment':  # IDENTIFIER EQUALS Expr
+        case 'Assignment':  # LET? IDENTIFIER EQUALS Expr
             yield AssignmentStatement(
                 line_number=None,
-                identifier=cast_tn(stmt.children[0]).token.value,
-                expr=cast_ntn(stmt.children[2])
+                identifier=cast_tn(stmt.children[1]).token.value,
+                expr=cast_ntn(stmt.children[3])
             )
         case 'GotoStatement':  # GOTO LineNumber
             target_line_node = cast_ntn(stmt.children[1])

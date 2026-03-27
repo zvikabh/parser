@@ -67,7 +67,7 @@ class BasicInterpreterTest(unittest.TestCase):
 
     def test_calc_primes(self) -> None:
         program = '''
-            n = 2
+            let n = 2
             10 div = 2
             20 if div > sqr(n) then goto 40 end if
             mult = div
