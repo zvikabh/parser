@@ -288,16 +288,21 @@ class _ParsingTable:
                 first_terminals.add(deriv.terms[0])
                 first_terminals_for_deriv[deriv].add(deriv.terms[0])
             else:
-                recursion_path.append((nonterminal, deriv))
                 pos_in_deriv = 0
                 first_terms_for_cur_deriv = set()
                 while pos_in_deriv < len(deriv.terms):
-                    first_terms_for_cur_term = self._find_first_terminals_for_nonterminal(
-                        deriv.terms[pos_in_deriv], recursion_path
-                    )
-                    first_terms_for_cur_deriv |= (first_terms_for_cur_term - {None})
-                    if None not in first_terms_for_cur_term:
+                    if deriv.terms[pos_in_deriv] in self.grammar.terminals:
+                        first_terminals.add(deriv.terms[pos_in_deriv])
+                        first_terminals_for_deriv[deriv].add(deriv.terms[pos_in_deriv])
                         break
+                    else:
+                        recursion_path.append((nonterminal, deriv))
+                        first_terms_for_cur_term = self._find_first_terminals_for_nonterminal(
+                            deriv.terms[pos_in_deriv], recursion_path
+                        )
+                        first_terms_for_cur_deriv |= (first_terms_for_cur_term - {None})
+                        if None not in first_terms_for_cur_term:
+                            break
                     pos_in_deriv += 1
                 else:
                     first_terms_for_cur_deriv.add(None)
