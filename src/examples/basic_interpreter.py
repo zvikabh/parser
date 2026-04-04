@@ -4,7 +4,7 @@ import dataclasses
 import math
 import numbers
 import sys
-from typing import cast, Any, Callable, Iterable, SupportsFloat, SupportsRound
+from typing import cast, Any, Callable, Iterable, SupportsFloat, SupportsRound, Type
 
 import lexer
 import parser
@@ -136,6 +136,10 @@ class Statement:
     def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
         raise NotImplementedError()
 
+    @classmethod
+    def from_node(cls, stmt: parser.NonterminalNode) -> Iterable[Statement]:
+        raise NotImplementedError()
+
 
 @dataclasses.dataclass
 class AssignmentStatement(Statement):
@@ -153,6 +157,15 @@ class AssignmentStatement(Statement):
                 self.type_coersion_fn = self._coerce_to_int
             case _:  # Assign to float
                 self.type_coersion_fn = self._coerce_to_float
+
+    @classmethod
+    def from_node(cls, stmt: parser.NonterminalNode) -> Iterable[Statement]:
+        # LET? VarName EQUALS Expr
+        yield AssignmentStatement(
+            line_number=None,
+            identifier=cast_tn(cast_ntn(stmt.children[1]).children[0]).token.value,
+            expr=cast_ntn(stmt.children[3])
+        )
 
     def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
         interpreter.variables[self.identifier] = self.type_coersion_fn(interpreter.evaluate_expr(self.expr))
@@ -199,6 +212,14 @@ class GotoStatement(Statement):
         interpreter.cur_statement = interpreter.line_number_to_stmt_index[self.target_line]
         yield from []  # To make Python recognize this as a generator
 
+    @classmethod
+    def from_node(cls, stmt: parser.NonterminalNode) -> Iterable[Statement]:
+        # GOTO LineNumber
+        target_line_node = cast_ntn(stmt.children[1])
+        target_line_terminal_node = cast_tn(target_line_node.children[0])
+        target_line = int(target_line_terminal_node.token.value)
+        yield GotoStatement(line_number=None, target_line=target_line)
+
     def __str__(self) -> str:
         return f'GOTO {self.target_line}'
 
@@ -220,6 +241,40 @@ class IfStatement(Statement):
     def __post_init__(self) -> None:
         assert self.condition.prod_id == 'Expr'
 
+    @classmethod
+    def from_node(cls, stmt: parser.NonterminalNode) -> Iterable[Statement]:
+        # IF Expr THEN Statement ElseClause?
+        then_stmts = list(_extract_statements(cast_ntn(stmt.children[3])))
+        else_clause = cast_ntn(stmt.children[4])
+        if else_clause.prod_id != 'ElseClause':
+            # Compiled statements layout, with statement numbers relative to current statement
+            # (where T = len(then_stmts)):
+            # 0:    IF (else skip T statements)
+            # 1..T: THEN statements
+            # T+1:  Subsequent statements
+            yield IfStatement(
+                line_number=None,
+                condition=cast_ntn(stmt.children[1]),
+                relative_jump_if_falsy=len(then_stmts)
+            )
+            yield from then_stmts
+        else:
+            else_stmts = list(_extract_statements(cast_ntn(else_clause.children[1])))
+            # Compiled statements layout, with statement numbers relative to current statement
+            # (where T = len(then_stmts), E = len(else_stmts)):
+            # 0:           IF (else skip T+1 statements)
+            # 1..T:        THEN statements
+            # T+1:         skip E statements
+            # T+2..T+E+1:  Subsequent statements
+            yield IfStatement(
+                line_number=None,
+                condition=cast_ntn(stmt.children[1]),
+                relative_jump_if_falsy=len(then_stmts) + 1
+            )
+            yield from then_stmts
+            yield RelativeJumpStatement(line_number=None, relative_jump=len(else_stmts))
+            yield from else_stmts
+
     def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
         condition = interpreter.evaluate_expr(self.condition)
         if condition:
@@ -238,6 +293,11 @@ class PrintStatement(Statement):
 
     def __post_init__(self) -> None:
         assert self.expr.prod_id == 'Expr'
+
+    @classmethod
+    def from_node(cls, stmt: parser.NonterminalNode) -> Iterable[Statement]:
+        # PRINT Expr
+        yield PrintStatement(line_number=None, expr=cast_ntn(stmt.children[1]))
 
     def exec(self, interpreter: BasicInterpreter) -> Iterable[str]:
         interpreter.cur_statement += 1
@@ -267,72 +327,43 @@ class RelativeJumpStatement(Statement):
         return f'JMP REL {self.relative_jump}'
 
 
+@dataclasses.dataclass
+class WhileStatement(Statement):
+    """Does not implement exec(), instead compiles this into IfStatement and RelativeJumpStatement."""
+    @classmethod
+    def from_node(cls, stmt: parser.NonterminalNode) -> Iterable[Statement]:
+        # WHILE Expr ROOT? WEND
+        loop_stmts = list(_extract_statements(cast_ntn(stmt.children[2])))
+        # Layout:    where L = len(loop_stmts)
+        # 0:   IF (else JMP REL L+1 statements)
+        # 1-L: loop statements
+        # L+1: JMP REL -(L+2)
+        yield IfStatement(
+            line_number=None,
+            condition=cast_ntn(stmt.children[1]),
+            relative_jump_if_falsy=len(loop_stmts) + 1,
+        )
+        yield from loop_stmts
+        yield RelativeJumpStatement(
+            line_number=None,
+            relative_jump=-(len(loop_stmts) + 2)
+        )
+
+
+_PROD_ID_TO_STMT_CLASS: dict[str, Type[Statement]] = {
+    'Assignment': AssignmentStatement,
+    'GotoStatement': GotoStatement,
+    'PrintStatement': PrintStatement,
+    'IfStatement': IfStatement,
+    'WhileStatement': WhileStatement,
+}
+
+
 def _node_to_statement(act_stmt: parser.NonterminalNode) -> Iterable[Statement]:
     assert act_stmt.prod_id == 'ActualStatement'
     stmt = cast_ntn(act_stmt.children[0])
-    match stmt.prod_id:
-        case 'Assignment':  # LET? VarName EQUALS Expr
-            yield AssignmentStatement(
-                line_number=None,
-                identifier=cast_tn(cast_ntn(stmt.children[1]).children[0]).token.value,
-                expr=cast_ntn(stmt.children[3])
-            )
-        case 'GotoStatement':  # GOTO LineNumber
-            target_line_node = cast_ntn(stmt.children[1])
-            target_line_terminal_node = cast_tn(target_line_node.children[0])
-            target_line = int(target_line_terminal_node.token.value)
-            yield GotoStatement(line_number=None, target_line=target_line)
-        case 'PrintStatement':  # PRINT Expr
-            yield PrintStatement(line_number=None, expr=cast_ntn(stmt.children[1]))
-        case 'IfStatement':  # IF Expr THEN Statement ElseClause?
-            then_stmts = list(_extract_statements(cast_ntn(stmt.children[3])))
-            else_clause = cast_ntn(stmt.children[4])
-            if else_clause.prod_id != 'ElseClause':
-                # Compiled statements layout, with statement numbers relative to current statement
-                # (where T = len(then_stmts)):
-                # 0:    IF (else skip T statements)
-                # 1..T: THEN statements
-                # T+1:  Subsequent statements
-                yield IfStatement(
-                    line_number=None,
-                    condition=cast_ntn(stmt.children[1]),
-                    relative_jump_if_falsy=len(then_stmts)
-                )
-                yield from then_stmts
-            else:
-                else_stmts = list(_extract_statements(cast_ntn(else_clause.children[1])))
-                # Compiled statements layout, with statement numbers relative to current statement
-                # (where T = len(then_stmts), E = len(else_stmts)):
-                # 0:           IF (else skip T+1 statements)
-                # 1..T:        THEN statements
-                # T+1:         skip E statements
-                # T+2..T+E+1:  Subsequent statements
-                yield IfStatement(
-                    line_number=None,
-                    condition=cast_ntn(stmt.children[1]),
-                    relative_jump_if_falsy=len(then_stmts) + 1
-                )
-                yield from then_stmts
-                yield RelativeJumpStatement(line_number=None, relative_jump=len(else_stmts))
-                yield from else_stmts
-        case 'WhileStatement':  # WHILE Expr ROOT? WEND
-            loop_stmts = list(_extract_statements(cast_ntn(stmt.children[2])))
-            # Layout:    where L = len(loop_stmts)
-            # 0:   IF (else JMP REL L+1 statements)
-            # 1-L: loop statements
-            # L+1: JMP REL -(L+2)
-            yield IfStatement(
-                line_number=None,
-                condition=cast_ntn(stmt.children[1]),
-                relative_jump_if_falsy=len(loop_stmts) + 1,
-            )
-            yield from loop_stmts
-            yield RelativeJumpStatement(
-                line_number=None,
-                relative_jump=-(len(loop_stmts) + 2)
-            )
-        case _:
-            raise BasicError(f'Unknown statement type: {stmt.prod_id}')
+    stmt_cls = _PROD_ID_TO_STMT_CLASS[stmt.prod_id]
+    yield from stmt_cls.from_node(stmt)
 
 
 def _extract_statements(ast: parser.NonterminalNode) -> Iterable[Statement]:
