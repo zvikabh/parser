@@ -74,7 +74,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
 *****
 ''')
 
-    def test_calc_primes(self) -> None:
+    def test_calc_primes_with_basic_stmts_only(self) -> None:
         program = '''
             let n% = 2
             10 div% = 2
@@ -105,6 +105,78 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
 19
 ''')
 
+    def test_while(self) -> None:
+        program = '''
+            N% = 0
+            WHILE N% < 10
+                PRINT N%
+                N% = N% + 1
+            WEND
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, '\n'.join(str(n) for n in range(10)) + '\n')
+
+    def test_nested_while(self) -> None:
+        program = '''
+            N% = 1
+            WHILE N% <= 5
+                J% = 0
+                S$ = ""
+                WHILE J% < 5 - N%
+                    S$ = S$ + " "
+                    J% = J% + 1
+                WEND
+                J% = 0
+                WHILE J% < N%
+                    S$ = S$ + "**"
+                    J% = J% + 1
+                WEND
+                PRINT S$
+                N% = N% + 1
+            WEND
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, '''\
+    **
+   ****
+  ******
+ ********
+**********
+''')
+
+    def test_calc_primes_with_while(self) -> None:
+        program = '''
+            LET N% = 1
+            10 WHILE N% < 20
+                N% = N% + 1
+                DIV% = 2
+                WHILE DIV% <= SQR(N%)
+                    MULT% = DIV%
+                    WHILE MULT% < N%
+                        MULT% = MULT% + DIV%
+                        IF MULT% = N% THEN
+                            GOTO 10
+                        END IF
+                    WEND
+                    DIV% = DIV% + 1
+                WEND
+                PRINT N%
+            WEND
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, '''\
+2
+3
+5
+7
+11
+13
+17
+19
+''')
 
 class BasicInterpreterInvalidCodeTest(unittest.TestCase):
 

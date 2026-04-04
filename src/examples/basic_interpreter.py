@@ -33,6 +33,8 @@ LEXER_RULES = r'''
     LET[ignore_case=true]          r'LET\b'
     PRINT[ignore_case=true]        r'PRINT\b'
     THEN[ignore_case=true]         r'THEN\b'
+    WEND[ignore_case=true]         r'WEND\b'
+    WHILE[ignore_case=true]        r'WHILE\b'
     FUNC_1ARG[ignore_case=true,to_upper=true]    r'((ABS|ASC|ATN|COS|EXP|INT|LEN|LOG|SGN|SIN|SQR|TAN|VAL)\b)|((STR|CHR)\$)'
     VARNAME_STR[to_upper=true]     r'[A-Za-z][A-Za-z0-9_]*\$'
     # We neglect the distinction between integer and long integers, and treat them all as Python integers, which have
@@ -50,12 +52,14 @@ GRAMMAR = '''
     ActualStatement  -> Assignment
                       | GotoStatement
                       | PrintStatement
-                      | IfStatement;
+                      | IfStatement
+                      | WhileStatement;
     Assignment       -> LET? VarName EQUALS Expr;
     GotoStatement    -> GOTO LineNumber;
     PrintStatement   -> PRINT Expr;
     IfStatement      -> IF Expr THEN ROOT ElseClause? ENDIF;
     ElseClause       -> ELSE ROOT;
+    WhileStatement   -> WHILE Expr ROOT? WEND;
     Expr             -> Expr3 MoreExpr?;
     MoreExpr         -> PREC_3_OPERATOR Expr
                       | EQUALS Expr;
@@ -205,9 +209,8 @@ class IfStatement(Statement):
 
     Attributes:
         condition: Node which will be evaluated to determine whether to jump.
-        relative_jump: Relative number of statements to jump if the condition is FALSY.
-            A value of 0 is the same as no-jump, causing the behavior to be identical regardless of the value of
-            `condition`.
+        relative_jump_if_falsy: Relative number of statements to jump if the condition is FALSE-y.
+            A value of 0 as a no-op, causing the behavior to be identical regardless of the value of `condition`.
             A value of 1 will skip the next statement.
             A value of -1 will cause the If statement to be re-evalauted (likely resulting in an infinite loop).
     """
@@ -248,7 +251,11 @@ class PrintStatement(Statement):
 class RelativeJumpStatement(Statement):
     """An internal statement, used when compiling flow control statements.
 
-    See `IfStatement` for definition and example uses of `relative_jump`.
+    Attributes:
+        relative_jump: Relative number of statements to jump.
+            A value of 0 is a no-op, moving on to the next statement.
+            A value of 1 will skip the next statement.
+            A value of -1 will cause an infinite loop.
     """
     relative_jump: int
 
@@ -257,7 +264,7 @@ class RelativeJumpStatement(Statement):
         yield from []
 
     def __str__(self) -> str:
-        return f'RELJMP {self.relative_jump}'
+        return f'JMP REL {self.relative_jump}'
 
 
 def _node_to_statement(act_stmt: parser.NonterminalNode) -> Iterable[Statement]:
@@ -308,7 +315,22 @@ def _node_to_statement(act_stmt: parser.NonterminalNode) -> Iterable[Statement]:
                 yield from then_stmts
                 yield RelativeJumpStatement(line_number=None, relative_jump=len(else_stmts))
                 yield from else_stmts
-
+        case 'WhileStatement':  # WHILE Expr ROOT? WEND
+            loop_stmts = list(_extract_statements(cast_ntn(stmt.children[2])))
+            # Layout:    where L = len(loop_stmts)
+            # 0:   IF (else JMP REL L+1 statements)
+            # 1-L: loop statements
+            # L+1: JMP REL -(L+2)
+            yield IfStatement(
+                line_number=None,
+                condition=cast_ntn(stmt.children[1]),
+                relative_jump_if_falsy=len(loop_stmts) + 1,
+            )
+            yield from loop_stmts
+            yield RelativeJumpStatement(
+                line_number=None,
+                relative_jump=-(len(loop_stmts) + 2)
+            )
         case _:
             raise BasicError(f'Unknown statement type: {stmt.prod_id}')
 
