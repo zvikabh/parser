@@ -178,6 +178,55 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
 19
 ''')
 
+    def test_for_loop(self) -> None:
+        program = '''
+            for i% = 1 to 5
+                print i%
+            next
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, '1\n2\n3\n4\n5\n')
+
+    def test_for_loop_with_step(self) -> None:
+        program = '''
+            for i% = 2 to 10 step 2
+                print i%
+            next
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, '2\n4\n6\n8\n10\n')
+
+    def test_calc_primes_with_for(self) -> None:
+        program = '''
+            n% = 2
+            while n% < 20
+                for div% = 2 to sqr(n%)
+                    for mult% = div% to n% step div%
+                        if mult% = n% then
+                            goto 10 
+                        end if
+                    next
+                next
+                print n%
+                10 n% = n% + 1
+            wend
+        '''
+        runner = basic_interpreter.BasicInterpreter(program)
+        output = ''.join(runner.exec())
+        self.assertEqual(output, '''\
+2
+3
+5
+7
+11
+13
+17
+19
+''')
+
+
 class BasicInterpreterInvalidCodeTest(unittest.TestCase):
 
     def test_expected_number(self) -> None:

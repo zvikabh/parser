@@ -28,11 +28,15 @@ LEXER_RULES = r'''
     EQUALS                         r'='
     ELSE[ignore_case=true]         r'ELSE\b'
     ENDIF[ignore_case=true]        r'END\s+IF\b'
+    FOR[ignore_case=true]          r'FOR\b'
     GOTO[ignore_case=true]         r'GOTO\b'
     IF[ignore_case=true]           r'IF\b'
     LET[ignore_case=true]          r'LET\b'
+    NEXT[ignore_case=true]         r'NEXT\b'
     PRINT[ignore_case=true]        r'PRINT\b'
+    STEP[ignore_case=true]         r'STEP\b'
     THEN[ignore_case=true]         r'THEN\b'
+    TO[ignore_case=true]           r'TO\b'
     WEND[ignore_case=true]         r'WEND\b'
     WHILE[ignore_case=true]        r'WHILE\b'
     FUNC_1ARG[ignore_case=true,to_upper=true]    r'((ABS|ASC|ATN|COS|EXP|INT|LEN|LOG|SGN|SIN|SQR|TAN|VAL)\b)|((STR|CHR)\$)'
@@ -50,15 +54,18 @@ GRAMMAR = '''
     Statement        -> LineNumber? ActualStatement;
     LineNumber       -> INTEGER_CONST;
     ActualStatement  -> Assignment
+                      | ForStatement
                       | GotoStatement
-                      | PrintStatement
                       | IfStatement
+                      | PrintStatement
                       | WhileStatement;
     Assignment       -> LET? VarName EQUALS Expr;
+    ForStatement     -> FOR VarName EQUALS Expr TO Expr StepClause? ROOT? NEXT;
+    StepClause       -> STEP Expr;
     GotoStatement    -> GOTO LineNumber;
-    PrintStatement   -> PRINT Expr;
     IfStatement      -> IF Expr THEN ROOT ElseClause? ENDIF;
     ElseClause       -> ELSE ROOT;
+    PrintStatement   -> PRINT Expr;
     WhileStatement   -> WHILE Expr ROOT? WEND;
     Expr             -> Expr3 MoreExpr?;
     MoreExpr         -> PREC_3_OPERATOR Expr
@@ -350,8 +357,90 @@ class WhileStatement(Statement):
         )
 
 
+@dataclasses.dataclass
+class ForStatement(Statement):
+    """Does not implement exec(), instead compiles this into more fundamental statements."""
+    @classmethod
+    def from_node(cls, stmt: parser.NonterminalNode) -> Iterable[Statement]:
+        # Node children: FOR VarName EQUALS Expr TO Expr StepClause? ROOT? NEXT
+        # Compiled layout:   (where L is the number of statements in the loop)
+        # 0:      LET VarName = StartingExpr
+        # 1:      IF VarName <= EndingExpr ; else JMP REL L+2
+        # 2..L+1: Loop statements
+        # L+2:    Increment VarName
+        # L+3:    JMP REL -(L+3)
+
+        loop_stmts = list(_extract_statements(cast_ntn(stmt.children[7])))
+        var_name_node = cast_ntn(stmt.children[1])
+        var_name = cast_tn(var_name_node.children[0]).token.value
+        ending_expr = cast_ntn(stmt.children[5])
+
+        # Find or synthesize step amount node
+        step_clause = cast_ntn(stmt.children[6])
+        if step_clause.prod_id != 'StepClause':
+            step_amount_node: parser.Node = parser.TerminalNode(
+                token=lexer.Token(token_id='INTEGER_CONST', value='1', pos_start=-1, pos_end=-1)
+            )
+        else:
+            # STEP NumericLiteral
+            step_amount_node = cast_ntn(step_clause.children[1])
+
+        yield AssignmentStatement(
+            line_number=None,
+            identifier=var_name,
+            expr=cast_ntn(stmt.children[3]),
+        )
+        yield IfStatement(
+            line_number=None,
+            relative_jump_if_falsy=len(loop_stmts) + 2,
+            condition=parser.NonterminalNode(
+                # Construct a tree representing `VarName <= EndingExpr`.
+                # We are collapsing a few levels of the grammar hierarchy here,
+                # but the evaluator is flexible enough to handle this.
+                prod_id='Expr',
+                children=[
+                    var_name_node,
+                    parser.NonterminalNode(
+                        prod_id='MoreExpr',
+                        children=[
+                            parser.TerminalNode(
+                                token=lexer.Token(token_id='PREC_3_OPERATOR', value='<=', pos_start=-1, pos_end=-1)
+                            ),
+                            ending_expr
+                        ]
+                    )
+                ]
+            )
+        )
+        yield from loop_stmts
+        yield AssignmentStatement(
+            line_number=None,
+            identifier=var_name,
+            expr=parser.NonterminalNode(
+                # Construct a tree representing `VarName + Step`.
+                prod_id = 'Expr',
+                children=[
+                    var_name_node,
+                    parser.NonterminalNode(
+                        prod_id='MoreExpr3',
+                        children=[
+                            parser.TerminalNode(
+                                token=lexer.Token(token_id='PREC_2_OPERATOR', value='+', pos_start=-1, pos_end=-1)
+                            ),
+                            step_amount_node
+                        ]
+                    )
+                ]
+            )
+        )
+        yield RelativeJumpStatement(
+            line_number=None,
+            relative_jump=-(len(loop_stmts) + 3)
+        )
+
 _PROD_ID_TO_STMT_CLASS: dict[str, Type[Statement]] = {
     'Assignment': AssignmentStatement,
+    'ForStatement': ForStatement,
     'GotoStatement': GotoStatement,
     'PrintStatement': PrintStatement,
     'IfStatement': IfStatement,
