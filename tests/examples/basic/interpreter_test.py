@@ -1,14 +1,14 @@
 import unittest
 
 import parser
-from examples import basic_interpreter
+from examples.basic import interpreter
 
 
 class BasicInterpreterValidProgramsTest(unittest.TestCase):
 
     def test_hello_world(self) -> None:
         program = 'PRINT "Hello, world!"'
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, "Hello, world!\n")
 
@@ -17,7 +17,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
             print val(str$(4.5))
             print chr$(asc("HELLO"))
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, "4.5\nH\n")
 
@@ -33,7 +33,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 PRINT "The end"
             END IF
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, "Hello, world!\n"*5 + "That's all, folks!\nThe end\n")
 
@@ -44,7 +44,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
             10 PRINT IFFY% * 2 + ELSEY% * 4
         '''
         # Note that IFFY% is an integer, so 5.1 is rounded to 5
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, "50\n")
 
@@ -64,7 +64,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 GOTO 10
             END IF
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '''\
 *
@@ -92,7 +92,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
             50 n% = n% + 1
             if n% < 20 then goto 10 end if
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '''\
 2
@@ -113,7 +113,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 N% = N% + 1
             WEND
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '\n'.join(str(n) for n in range(10)) + '\n')
 
@@ -136,7 +136,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 N% = N% + 1
             WEND
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '''\
     **
@@ -165,7 +165,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 PRINT N%
             WEND
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '''\
 2
@@ -184,7 +184,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 print i%
             next
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '1\n2\n3\n4\n5\n')
 
@@ -194,7 +194,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 print i%
             next
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '2\n4\n6\n8\n10\n')
 
@@ -213,7 +213,7 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
                 10 n% = n% + 1
             wend
         '''
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '''\
 2
@@ -231,14 +231,14 @@ class BasicInterpreterInvalidCodeTest(unittest.TestCase):
 
     def test_expected_number(self) -> None:
         program = 'PRINT ABS("one")'
-        runner = basic_interpreter.BasicInterpreter(program)
-        with self.assertRaisesRegex(basic_interpreter.BasicError, 'Argument to function ABS must be of type Number'):
+        runner = interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(interpreter.BasicError, 'Argument to function ABS must be of type Number'):
             list(runner.exec())
 
     def test_expected_string(self) -> None:
         program = 'PRINT LEN(3000)'
-        runner = basic_interpreter.BasicInterpreter(program)
-        with self.assertRaisesRegex(basic_interpreter.BasicError, 'Argument to function LEN must be of type str'):
+        runner = interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(interpreter.BasicError, 'Argument to function LEN must be of type str'):
             list(runner.exec())
 
     def test_missing_end_if(self) -> None:
@@ -246,36 +246,36 @@ class BasicInterpreterInvalidCodeTest(unittest.TestCase):
         with self.assertRaisesRegex(
             parser.ParserError, r'The terminal \$ is not allowed to start a derivation of ElseClause\?'
         ):
-            basic_interpreter.BasicInterpreter(program)
+            interpreter.BasicInterpreter(program)
 
     def test_missing_line_number(self) -> None:
         program = 'IF 2 > 1 THEN GOTO 10 END IF'
-        runner = basic_interpreter.BasicInterpreter(program)
-        with self.assertRaisesRegex(basic_interpreter.BasicError, 'GOTO specified an invalid target line number 10'):
+        runner = interpreter.BasicInterpreter(program)
+        with self.assertRaisesRegex(interpreter.BasicError, 'GOTO specified an invalid target line number 10'):
             list(runner.exec())
 
     def test_type_mismatch(self) -> None:
         program = 'LET S = "foo"'
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         with self.assertRaisesRegex(
-            basic_interpreter.BasicError, 'Type mistmatch: Received value \'foo\' of type str, expecting Number'
+            interpreter.BasicError, 'Type mistmatch: Received value \'foo\' of type str, expecting Number'
         ):
             list(runner.exec())
 
     def test_type_mismatch_in_func(self) -> None:
         program = 'PRINT ASC(5)'
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         with self.assertRaisesRegex(
-            basic_interpreter.BasicError,
+            interpreter.BasicError,
             'Argument to function ASC must be of type str, but received value 5 of type int'
         ):
             list(runner.exec())
 
     def test_type_mismatch_in_operator(self) -> None:
         program = 'PRINT "A" * 4'
-        runner = basic_interpreter.BasicInterpreter(program)
+        runner = interpreter.BasicInterpreter(program)
         with self.assertRaisesRegex(
-            basic_interpreter.BasicError,
+            interpreter.BasicError,
             'Type mistmatch in call to operator `\\*`: Left argument \'A\' has type str'
         ):
             list(runner.exec())
