@@ -1,3 +1,4 @@
+from pathlib import Path
 import unittest
 
 import parser
@@ -74,37 +75,6 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
 *****
 ''')
 
-    def test_calc_primes_with_basic_stmts_only(self) -> None:
-        program = '''
-            let n% = 2
-            10 div% = 2
-            20 if div% > sqr(n%) then goto 40 end if
-            mult% = div%
-            30 if mult% = n% then goto 50 end if
-            if mult% > n% then
-                div% = div% + 1
-                goto 20
-            else
-                mult% = mult% + div%
-                goto 30
-            end if
-            40 print n%
-            50 n% = n% + 1
-            if n% < 20 then goto 10 end if
-        '''
-        runner = interpreter.BasicInterpreter(program)
-        output = ''.join(runner.exec())
-        self.assertEqual(output, '''\
-2
-3
-5
-7
-11
-13
-17
-19
-''')
-
     def test_while(self) -> None:
         program = '''
             N% = 0
@@ -116,67 +86,6 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
         runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '\n'.join(str(n) for n in range(10)) + '\n')
-
-    def test_nested_while(self) -> None:
-        program = '''
-            N% = 1
-            WHILE N% <= 5
-                J% = 0
-                S$ = ""
-                WHILE J% < 5 - N%
-                    S$ = S$ + " "
-                    J% = J% + 1
-                WEND
-                J% = 0
-                WHILE J% < N%
-                    S$ = S$ + "**"
-                    J% = J% + 1
-                WEND
-                PRINT S$
-                N% = N% + 1
-            WEND
-        '''
-        runner = interpreter.BasicInterpreter(program)
-        output = ''.join(runner.exec())
-        self.assertEqual(output, '''\
-    **
-   ****
-  ******
- ********
-**********
-''')
-
-    def test_calc_primes_with_while(self) -> None:
-        program = '''
-            LET N% = 1
-            10 WHILE N% < 20
-                N% = N% + 1
-                DIV% = 2
-                WHILE DIV% <= SQR(N%)
-                    MULT% = DIV%
-                    WHILE MULT% < N%
-                        MULT% = MULT% + DIV%
-                        IF MULT% = N% THEN
-                            GOTO 10
-                        END IF
-                    WEND
-                    DIV% = DIV% + 1
-                WEND
-                PRINT N%
-            WEND
-        '''
-        runner = interpreter.BasicInterpreter(program)
-        output = ''.join(runner.exec())
-        self.assertEqual(output, '''\
-2
-3
-5
-7
-11
-13
-17
-19
-''')
 
     def test_for_loop(self) -> None:
         program = '''
@@ -197,34 +106,6 @@ class BasicInterpreterValidProgramsTest(unittest.TestCase):
         runner = interpreter.BasicInterpreter(program)
         output = ''.join(runner.exec())
         self.assertEqual(output, '2\n4\n6\n8\n10\n')
-
-    def test_calc_primes_with_for(self) -> None:
-        program = '''
-            n% = 2
-            while n% < 20
-                for div% = 2 to sqr(n%)
-                    for mult% = div% to n% step div%
-                        if mult% = n% then
-                            goto 10 
-                        end if
-                    next
-                next
-                print n%
-                10 n% = n% + 1
-            wend
-        '''
-        runner = interpreter.BasicInterpreter(program)
-        output = ''.join(runner.exec())
-        self.assertEqual(output, '''\
-2
-3
-5
-7
-11
-13
-17
-19
-''')
 
 
 class BasicInterpreterInvalidCodeTest(unittest.TestCase):
@@ -280,6 +161,20 @@ class BasicInterpreterInvalidCodeTest(unittest.TestCase):
         ):
             list(runner.exec())
 
+
+class BasicInterpreterIntegrationTests(unittest.TestCase):
+
+    def test_integration(self) -> None:
+        program_files = sorted(Path(f) for f in (Path(__file__).parent / 'integration').glob('*.bas'))
+        self.assertGreater(len(program_files), 0, 'No integration tests found')
+        expected_output_files = [fname.with_suffix('.expected_output.txt') for fname in program_files]
+
+        for program_file, expected_output_file in zip(program_files, expected_output_files):
+            with self.subTest(file=program_file):
+                program = program_file.read_text()
+                runner = interpreter.BasicInterpreter(program)
+                output = ''.join(runner.exec())
+                self.assertEqual(output, expected_output_file.read_text())
 
 
 if __name__ == '__main__':
