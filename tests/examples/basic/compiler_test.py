@@ -121,6 +121,41 @@ class BasicCompilerTest(unittest.TestCase):
             }
         ''')
 
+    def test_empty_while(self) -> None:
+        prog = '''
+            a% = 0
+            while a% < 10
+            wend
+        '''
+        c_prog = compiler.BasicCompiler(prog).compile()
+        self.assert_program_lines_equal(c_prog, '''
+            int main() {
+                long var_A_int = 0;
+                while ((((var_A_int)<(10)) ? -1 : 0)) {
+                }
+            }
+        ''')
+
+    def test_while(self) -> None:
+        prog = '''
+            a% = 0
+            while a% < 10
+                print a%
+                a% = a% + 1
+            wend
+        '''
+        c_prog = compiler.BasicCompiler(prog).compile()
+        self.assert_program_lines_equal(c_prog, '''
+            #include <iostream>
+            int main() {
+                long var_A_int = 0;
+                while ((((var_A_int)<(10)) ? -1 : 0)) {
+                    std::cout << (var_A_int) << std::endl;
+                    var_A_int = ((var_A_int)+(1));
+                }
+            }
+        ''')
+
 
 class BasicCompilerErrorsTest(unittest.TestCase):
 
@@ -157,6 +192,23 @@ class BasicCompilerErrorsTest(unittest.TestCase):
         prog = 'let a$ = 1'
         with self.assertRaisesRegex(compiler.BasicCompilerError,
                                     r'Variable A\$ cannot be assigned a value of type INTEGER'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_while_type_mistmatch(self) -> None:
+        prog = '''
+            A$ = "foo"
+            while A$
+            wend
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'WHILE condition must be a numeric type'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_while_unknown_var(self) -> None:
+        prog = '''
+            while A% < 10
+            wend
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'Undefined variable: A%'):
             compiler.BasicCompiler(prog).compile()
 
 

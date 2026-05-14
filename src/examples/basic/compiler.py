@@ -105,25 +105,28 @@ class BasicCompiler:
         self.variables = set[str]()
 
     def compile(self) -> str:
-        c_stmts = ['int main() {']
-        basic_stmts = self.ast
-        while basic_stmts.children:
-            basic_stmt = cast_ntn(basic_stmts.children[0])
-            assert basic_stmt.prod_id == 'Statement'
-            c_stmts.append(self._basic_to_c_stmt(basic_stmt))
-            basic_stmts = cast_ntn(basic_stmts.children[1])
-        c_stmts.append('}')
+        c_stmts = ['int main() {'] + self._compile_statements(self.ast, indent=1) + ['}']
         includes_list = '\n'.join(f'#include <{inc_file}>' for inc_file in sorted(self.includes))
         return includes_list + '\n' + '\n'.join(c_stmts)
 
-    def _basic_to_c_stmt(self, basic_stmt: parser.NonterminalNode) -> str:
-        c_stmt = '  '
+    def _compile_statements(self, stmts: parser.NonterminalNode, indent: int) -> list[str]:
+        # Side effect: update self.variables, self.line_numbers, and self.includes
+        c_stmts = list[str]()
+        while stmts.children:
+            basic_stmt = cast_ntn(stmts.children[0])
+            assert basic_stmt.prod_id == 'Statement'
+            c_stmts.append(self._basic_to_c_stmt(basic_stmt, indent))
+            stmts = cast_ntn(stmts.children[1])
+        return c_stmts
+
+    def _basic_to_c_stmt(self, basic_stmt: parser.NonterminalNode, indent: int) -> str:
+        c_stmt = '  ' * indent
         c_stmt += self._line_number_to_c_label(line_number_node=cast_ntn(basic_stmt.children[0]))
         actual_stmt = cast_ntn(basic_stmt.children[1])
         assert actual_stmt.prod_id == 'ActualStatement'
         inner_stmt = cast_ntn(actual_stmt.children[0])
         stmt_translator = self._PROD_ID_TO_STMT_TRANSLATOR[inner_stmt.prod_id]
-        return c_stmt + stmt_translator(self, inner_stmt)
+        return c_stmt + stmt_translator(self, inner_stmt, indent)
 
     def _line_number_to_c_label(self, line_number_node: parser.NonterminalNode) -> str:
         if line_number_node.prod_id != 'LineNumber':
@@ -136,14 +139,14 @@ class BasicCompiler:
         self.line_numbers.add(line_number)
         return get_line_label(line_number) + ': '
 
-    def _translate_goto_stmt(self, stmt: parser.NonterminalNode) -> str:
+    def _translate_goto_stmt(self, stmt: parser.NonterminalNode, indent: int) -> str:
         # GOTO LineNumber
         target_line_node = cast_ntn(stmt.children[1])
         target_line_terminal_node = cast_tn(target_line_node.children[0])
         target_line = int(target_line_terminal_node.token.value)
         return f'goto {get_line_label(target_line)};'
 
-    def _translate_print_stmt(self, stmt: parser.NonterminalNode) -> str:
+    def _translate_print_stmt(self, stmt: parser.NonterminalNode, indent: int) -> str:
         # PRINT Expr
         self.includes.add('iostream')
         expr = cast_ntn(stmt.children[1])
@@ -151,7 +154,7 @@ class BasicCompiler:
         c_expr, _ = self._translate_expr(expr)
         return f'std::cout << ({c_expr}) << std::endl;'
 
-    def _translate_assignment_stmt(self, stmt: parser.NonterminalNode) -> str:
+    def _translate_assignment_stmt(self, stmt: parser.NonterminalNode, indent: int) -> str:
         # LET? VarName EQUALS Expr
         var_name_ntn = cast_ntn(stmt.children[1])
         var_name_tn = cast_tn(var_name_ntn.children[0])
@@ -172,10 +175,20 @@ class BasicCompiler:
                 self.includes.add('string')
             return f'{var_type.c_type()} {c_var_name} = {c_new_value};'
 
-    _PROD_ID_TO_STMT_TRANSLATOR: dict[str, Callable[[BasicCompiler, parser.NonterminalNode], str]] = {
+    def _translate_while_stmt(self, stmt: parser.NonterminalNode, indent: int) -> str:
+        # WHILE Expr ROOT? WEND
+        while_expr, while_type = self._translate_expr(stmt.children[1])
+        if while_type != BasicType.INTEGER and while_type != BasicType.FLOAT:
+            raise BasicCompilerError("WHILE condition must be a numeric type")
+        loop_stmts = self._compile_statements(cast_ntn(stmt.children[2]), indent=indent + 1)
+        c_code = [f'while ({while_expr}) {{'] + loop_stmts + ['  ' * indent + '}']
+        return '\n'.join(c_code)
+
+    _PROD_ID_TO_STMT_TRANSLATOR: dict[str, Callable[[BasicCompiler, parser.NonterminalNode, int], str]] = {
         'Assignment': _translate_assignment_stmt,
         'GotoStatement': _translate_goto_stmt,
         'PrintStatement': _translate_print_stmt,
+        'WhileStatement': _translate_while_stmt,
     }
 
     def _translate_expr(self, expr: parser.Node) -> tuple[str, BasicType]:
