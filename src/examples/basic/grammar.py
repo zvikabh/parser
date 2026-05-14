@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import lexer
 import parser
 
@@ -81,3 +83,13 @@ GRAMMAR = '''
 def get_basic_parser() -> parser.Parser:
     lex = lexer.Lexer(LEXER_RULES)
     return parser.Parser(lex, GRAMMAR)
+
+
+def cast_ntn(node: parser.Node) -> parser.NonterminalNode:
+    assert isinstance(node, parser.NonterminalNode)
+    return node
+
+
+def cast_tn(node: parser.Node) -> parser.TerminalNode:
+    assert isinstance(node, parser.TerminalNode)
+    return node

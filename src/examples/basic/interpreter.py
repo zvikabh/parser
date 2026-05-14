@@ -11,6 +11,7 @@ import lexer
 import parser
 
 from examples.basic import grammar
+from examples.basic.grammar import cast_ntn, cast_tn
 
 
 class BasicError(Exception):
@@ -50,16 +51,6 @@ FUNC_1ARG_FUNCS: dict[str, tuple[type, Callable[[Any], Any]]] = {
     'TAN': (numbers.Number, lambda x: math.tan(x)),
     'VAL': (str, lambda x: float(x)),
 }
-
-
-def cast_ntn(node: parser.Node) -> parser.NonterminalNode:
-    assert isinstance(node, parser.NonterminalNode)
-    return node
-
-
-def cast_tn(node: parser.Node) -> parser.TerminalNode:
-    assert isinstance(node, parser.TerminalNode)
-    return node
 
 
 @dataclasses.dataclass
