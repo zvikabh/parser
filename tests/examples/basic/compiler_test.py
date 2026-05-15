@@ -326,9 +326,9 @@ class BasicCompilerErrorsTest(unittest.TestCase):
     def test_for_step_value_numeric_type(self) -> None:
         prog = '''
             B$ = "1"
-            FOR A% = 0 TO 5 STEP B$
-                PRINT A%
-            NEXT
+            for A% = 0 to 5 step B$
+                print A%
+            next
         '''
         with self.assertRaisesRegex(compiler.BasicCompilerError, r'FOR step value must have a numeric type'):
             compiler.BasicCompiler(prog).compile()
