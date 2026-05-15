@@ -1,6 +1,10 @@
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import tempfile
 import unittest
 
-import parser
 from examples.basic import compiler
 
 
@@ -9,7 +13,7 @@ class BasicCompilerTest(unittest.TestCase):
     def assert_program_lines_equal(self, prog1: str, prog2: str) -> None:
         prog1_strip = [line.strip() for line in prog1.split('\n') if line.strip()]
         prog2_strip = [line.strip() for line in prog2.split('\n') if line.strip()]
-        self.assertEqual(prog1_strip, prog2_strip)
+        self.assertEqual(prog2_strip, prog1_strip)
 
     def test_goto(self) -> None:
         basic_prog = '''
@@ -156,6 +160,63 @@ class BasicCompilerTest(unittest.TestCase):
             }
         ''')
 
+    def test_if(self) -> None:
+        prog = '''
+            A% = 0
+            B! = 1
+            IF A% < B! THEN PRINT "A" ELSE PRINT "B" END IF
+        '''
+        c_prog = compiler.BasicCompiler(prog).compile()
+        self.assert_program_lines_equal(c_prog, '''
+            #include <iostream>
+            #include <string>
+            int main() {
+                long var_A_int = 0;
+                double var_B_float = 1;
+                if ((((var_A_int)<(var_B_float)) ? -1 : 0)) {
+                    std::cout << (std::string("A")) << std::endl;
+                } else {
+                    std::cout << (std::string("B")) << std::endl;
+                }
+            }
+        ''')
+
+    def test_for_simple(self) -> None:
+        prog = '''
+            FOR A% = 0 TO 10
+                PRINT A%
+            NEXT
+        '''
+        c_prog = compiler.BasicCompiler(prog).compile()
+        self.assert_program_lines_equal(c_prog, '''
+            #include <iostream>
+            int main() {
+                long var_A_int = 0;
+                for (; var_A_int <= (10); var_A_int += 1) {
+                    std::cout << (var_A_int) << std::endl;
+                }
+            }
+        ''')
+
+    def test_for_with_step(self) -> None:
+        prog = '''
+            S% = 1 + 1
+            FOR A% = 0 TO 10 STEP S%
+                PRINT A%
+            NEXT
+        '''
+        c_prog = compiler.BasicCompiler(prog).compile()
+        self.assert_program_lines_equal(c_prog, '''
+            #include <iostream>
+            int main() {
+                long var_S_int = ((1)+(1));
+                long var_A_int = 0;
+                for (; var_A_int <= (10); var_A_int += (var_S_int)) {
+                    std::cout << (var_A_int) << std::endl;
+                }
+            }
+        ''')
+
 
 class BasicCompilerErrorsTest(unittest.TestCase):
 
@@ -210,6 +271,110 @@ class BasicCompilerErrorsTest(unittest.TestCase):
         '''
         with self.assertRaisesRegex(compiler.BasicCompilerError, r'Undefined variable: A%'):
             compiler.BasicCompiler(prog).compile()
+
+    def test_if_type_mistmatch(self) -> None:
+        prog = '''
+            A$ = "foo"
+            if A$ then print A$ end if
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'IF condition must be a numeric type'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_if_unknown_var(self) -> None:
+        prog = 'if A% < 10 then print "foo" end if'
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'Undefined variable: A%'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_for_non_numeric_type(self) -> None:
+        prog = '''
+            FOR A$ = 0 TO 10
+                PRINT A$
+            NEXT
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError,
+                                    r'FOR iteration variable A\$ must have a numeric type'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_for_initial_value_numeric_type(self) -> None:
+        prog = '''
+            FOR A% = "0" TO 10
+                PRINT A%
+            NEXT
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'FOR initial value must have a numeric type'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_for_stop_value_numeric_type(self) -> None:
+        prog = '''
+            FOR A% = 0 TO "5"
+                PRINT A%
+            NEXT
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'FOR stop value must have a numeric type'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_for_step_value_numeric_type(self) -> None:
+        prog = '''
+            B$ = "1"
+            FOR A% = 0 TO 5 STEP B$
+                PRINT A%
+            NEXT
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'FOR step value must have a numeric type'):
+            compiler.BasicCompiler(prog).compile()
+
+    def test_for_step_value_undefined(self) -> None:
+        prog = '''
+            FOR A% = 0 TO 5 STEP B%
+                PRINT A%
+            NEXT
+        '''
+        with self.assertRaisesRegex(compiler.BasicCompilerError, r'Undefined variable: B%'):
+            compiler.BasicCompiler(prog).compile()
+
+
+# class BasicInterpreterIntegrationTests(unittest.TestCase):
+#
+#     def test_integration(self) -> None:
+#         program_files = sorted(Path(f) for f in (Path(__file__).parent / 'integration').glob('*.bas'))
+#         self.assertGreater(len(program_files), 0, 'No integration tests found')
+#         expected_output_files = [fname.with_suffix('.expected_output.txt') for fname in program_files]
+#
+#         for program_file, expected_output_file in zip(program_files, expected_output_files):
+#             with self.subTest(file=program_file):
+#                 program = program_file.read_text()
+#                 c_code = compiler.BasicCompiler(program).compile()
+#                 with tempfile.TemporaryDirectory() as tmp:
+#                     temp_dir = Path(tmp)
+#                     c_filename = temp_dir / 'program.cc'
+#                     c_filename.write_text(c_code)
+#                     binary_filename = c_filename.with_suffix('.out')
+#
+#                     if platform.system() == 'Windows':
+#                         result = subprocess.run(
+#                             ['wsl', 'wslpath', '-a', str(c_filename).replace('\\', '\\\\')],
+#                             # check=True,
+#                             text=True,
+#                             shell=True,
+#                             capture_output=True
+#                         )
+#                         if result.returncode != 0:
+#                             raise RuntimeError(f'wslpath failed with: {result.stderr} on fname {str(c_filename)}')
+#                         c_filename_wsl = result.stdout.strip()
+#                         binary_filename_wsl = c_filename_wsl + '.out'
+#                         subprocess.run(
+#                             ['wsl', 'bash', '-c', f'g++ {c_filename_wsl} -o {binary_filename_wsl}'],
+#                             shell=True,
+#                             check=True
+#                         )
+#                         output = subprocess.run(
+#                             ['wsl', 'bash', '-c', str(binary_filename_wsl)], shell=True, check=True, capture_output=True
+#                         ).stdout.decode()
+#                     else:
+#                         subprocess.run(['g++', c_filename, '-o', binary_filename], check=True)
+#                         output = subprocess.run(binary_filename, check=True, text=True, capture_output=True).stdout
+#
+#                 self.assertEqual(output, expected_output_file.read_text())
 
 
 if __name__ == '__main__':

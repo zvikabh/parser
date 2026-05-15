@@ -75,7 +75,10 @@ def get_boolean_op_translator(c_operator: str) -> Callable[[str, str], str]:
 
 # Map from BASIC operator to tuple (list of possible input and output types, #includes, translator)
 _OPERATORS: dict[str, tuple[list[tuple[BasicType, BasicType]], list[str], Callable[[str, str], str]]] = {
-    '+': ([(BasicType.INTEGER, BasicType.INTEGER), (BasicType.FLOAT, BasicType.FLOAT)], [], get_op_translator('+')),
+    '+': ([(BasicType.INTEGER, BasicType.INTEGER),
+           (BasicType.FLOAT, BasicType.FLOAT),
+           (BasicType.STRING, BasicType.STRING)],
+          [], get_op_translator('+')),
     '-': ([(BasicType.INTEGER, BasicType.INTEGER), (BasicType.FLOAT, BasicType.FLOAT)], [], get_op_translator('-')),
     '*': ([(BasicType.INTEGER, BasicType.INTEGER), (BasicType.FLOAT, BasicType.FLOAT)], [], get_op_translator('*')),
     # Division always returns a float in BASIC. Integer inputs are upcasted.
@@ -184,9 +187,59 @@ class BasicCompiler:
         c_code = [f'while ({while_expr}) {{'] + loop_stmts + ['  ' * indent + '}']
         return '\n'.join(c_code)
 
+    def _translate_if_stmt(self, stmt: parser.NonterminalNode, indent: int) -> str:
+        # IF Expr THEN ROOT ElseClause? ENDIF
+        cond_expr, cond_type = self._translate_expr(stmt.children[1])
+        if cond_type != BasicType.INTEGER and cond_type != BasicType.FLOAT:
+            raise BasicCompilerError("IF condition must be a numeric type")
+        then_stmts = self._compile_statements(cast_ntn(stmt.children[3]), indent=indent + 1)
+        c_code = [f'if ({cond_expr}) {{'] + then_stmts
+        else_clause_node = cast_ntn(stmt.children[4])
+        if else_clause_node.prod_id == 'ElseClause':
+            # ELSE ROOT
+            else_stmts = self._compile_statements(cast_ntn(else_clause_node.children[1]), indent=indent + 1)
+            c_code.append('  ' * indent + '} else {')
+            c_code.extend(else_stmts)
+        c_code.append('  ' * indent + '}')
+        return '\n'.join(c_code)
+
+    def _translate_for_stmt(self, stmt: parser.NonterminalNode, indent: int) -> str:
+        # FOR VarName EQUALS Expr TO Expr StepClause? ROOT? NEXT
+        c_code = []
+        basic_varname = cast_tn(cast_ntn(stmt.children[1]).children[0]).token.value
+        c_varname, var_type = self._translate_varname(basic_varname)
+        if not BasicType.castable(var_type, BasicType.FLOAT):
+            raise BasicCompilerError(f'FOR iteration variable {basic_varname} must have a numeric type')
+        c_init_value, init_value_type = self._translate_expr(stmt.children[3])
+        if not BasicType.castable(init_value_type, BasicType.FLOAT):
+            raise BasicCompilerError(f'FOR initial value must have a numeric type')
+        if basic_varname not in self.variables:
+            self.variables.add(basic_varname)
+            c_code.append(f'{var_type.c_type()} {c_varname} = {c_init_value};')
+        else:
+            c_code.append(f'{c_varname} = {c_init_value};')
+        c_stop_value, stop_value_type = self._translate_expr(stmt.children[5])
+        if not BasicType.castable(stop_value_type, BasicType.FLOAT):
+            raise BasicCompilerError(f'FOR stop value must have a numeric type')
+        step_node = cast_ntn(stmt.children[6])
+        if step_node.prod_id == 'StepClause':
+            # STEP Expr
+            c_step_value, step_value_type = self._translate_expr(step_node.children[1])
+            c_step_value = f'({c_step_value})'
+            if not BasicType.castable(step_value_type, BasicType.FLOAT):
+                raise BasicCompilerError(f'FOR step value must have a numeric type')
+        else:
+            c_step_value = '1'
+        c_code.append('  ' * indent + f'for (; {c_varname} <= ({c_stop_value}); {c_varname} += {c_step_value}) {{')
+        c_code.extend(self._compile_statements(cast_ntn(stmt.children[7]), indent=indent+1))
+        c_code.append('  ' * indent + '}')
+        return '\n'.join(c_code)
+
     _PROD_ID_TO_STMT_TRANSLATOR: dict[str, Callable[[BasicCompiler, parser.NonterminalNode, int], str]] = {
         'Assignment': _translate_assignment_stmt,
         'GotoStatement': _translate_goto_stmt,
+        'IfStatement': _translate_if_stmt,
+        'ForStatement': _translate_for_stmt,
         'PrintStatement': _translate_print_stmt,
         'WhileStatement': _translate_while_stmt,
     }
@@ -278,10 +331,13 @@ class BasicCompiler:
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <input-program-file>")
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <input-basic-filename> <output-cpp-filename>")
 
     with open(sys.argv[1], 'r') as f:
         program = f.read()
 
-    compiler = BasicCompiler(program)
+    cpp_code = BasicCompiler(program).compile()
+
+    with open(sys.argv[2], 'w') as f:
+        f.write(cpp_code)
