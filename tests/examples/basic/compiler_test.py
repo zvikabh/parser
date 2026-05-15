@@ -384,6 +384,7 @@ class BasicInterpreterIntegrationTests(unittest.TestCase):
                         subprocess.run(['g++', c_filename, '-o', binary_filename], check=True)
                         output = subprocess.run(binary_filename, check=True, text=True, capture_output=True).stdout
 
+                print(output)
                 self.assertEqual(output, expected_output_file.read_text())
 
 
