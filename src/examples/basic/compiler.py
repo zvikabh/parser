@@ -108,9 +108,23 @@ class BasicCompiler:
         self.variables = set[str]()
 
     def compile(self) -> str:
-        c_stmts = ['int main() {'] + self._compile_statements(self.ast, indent=1) + ['}']
-        includes_list = '\n'.join(f'#include <{inc_file}>' for inc_file in sorted(self.includes))
-        return includes_list + '\n' + '\n'.join(c_stmts)
+        main_prog = self._compile_statements(self.ast, indent=1)
+        includes_list = [f'#include <{inc_file}>' for inc_file in sorted(self.includes)]
+        variable_defs = []
+        for basic_var in sorted(self.variables):
+            c_var, basic_type = self._translate_varname(basic_var)
+            if basic_type == BasicType.STRING:
+                c_def = f'  {basic_type.c_type()} {c_var};'
+            else:
+                c_def = f'  {basic_type.c_type()} {c_var} = 0;'
+            variable_defs.append(c_def)
+
+        c_code = list(includes_list)
+        c_code.append('int main() {')
+        c_code.extend(variable_defs)
+        c_code.extend(main_prog)
+        c_code.append('}')
+        return '\n'.join(c_code)
 
     def _compile_statements(self, stmts: parser.NonterminalNode, indent: int) -> list[str]:
         # Side effect: update self.variables, self.line_numbers, and self.includes
@@ -168,15 +182,10 @@ class BasicCompiler:
             raise BasicCompilerError(
                 f'Type mismatch: Variable {basic_var_name} cannot be assigned a value of type {new_value_type.name}'
             )
-        if basic_var_name in self.variables:
-            # Re-assignment
-            return f'{c_var_name} = {c_new_value};'
-        else:
-            # New variable
-            self.variables.add(basic_var_name)
-            if var_type == BasicType.STRING:
-                self.includes.add('string')
-            return f'{var_type.c_type()} {c_var_name} = {c_new_value};'
+        self.variables.add(basic_var_name)
+        if var_type == BasicType.STRING:
+            self.includes.add('string')
+        return f'{c_var_name} = {c_new_value};'
 
     def _translate_while_stmt(self, stmt: parser.NonterminalNode, indent: int) -> str:
         # WHILE Expr ROOT? WEND
@@ -213,11 +222,8 @@ class BasicCompiler:
         c_init_value, init_value_type = self._translate_expr(stmt.children[3])
         if not BasicType.castable(init_value_type, BasicType.FLOAT):
             raise BasicCompilerError(f'FOR initial value must have a numeric type')
-        if basic_varname not in self.variables:
-            self.variables.add(basic_varname)
-            c_code.append(f'{var_type.c_type()} {c_varname} = {c_init_value};')
-        else:
-            c_code.append(f'{c_varname} = {c_init_value};')
+        self.variables.add(basic_varname)
+        c_code.append(f'{c_varname} = {c_init_value};')
         c_stop_value, stop_value_type = self._translate_expr(stmt.children[5])
         if not BasicType.castable(stop_value_type, BasicType.FLOAT):
             raise BasicCompilerError(f'FOR stop value must have a numeric type')

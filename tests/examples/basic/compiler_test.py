@@ -105,7 +105,8 @@ class BasicCompilerTest(unittest.TestCase):
             #include <iostream>
             #include <string>
             int main() {
-                std::string var_A_str = std::string("hello");
+                std::string var_A_str;
+                var_A_str = std::string("hello");
                 std::cout << (var_A_str) << std::endl;
                 var_A_str = std::string("goodbye");
                 std::cout << (var_A_str) << std::endl;
@@ -120,8 +121,10 @@ class BasicCompilerTest(unittest.TestCase):
         c_prog = compiler.BasicCompiler(prog).compile()
         self.assert_program_lines_equal(c_prog, '''
             int main() {
-                long var_A_int = 3;
-                double var_B_float = var_A_int;
+                long var_A_int = 0;
+                double var_B_float = 0;
+                var_A_int = 3;
+                var_B_float = var_A_int;
             }
         ''')
 
@@ -135,6 +138,7 @@ class BasicCompilerTest(unittest.TestCase):
         self.assert_program_lines_equal(c_prog, '''
             int main() {
                 long var_A_int = 0;
+                var_A_int = 0;
                 while ((((var_A_int)<(10)) ? -1 : 0)) {
                 }
             }
@@ -153,6 +157,7 @@ class BasicCompilerTest(unittest.TestCase):
             #include <iostream>
             int main() {
                 long var_A_int = 0;
+                var_A_int = 0;
                 while ((((var_A_int)<(10)) ? -1 : 0)) {
                     std::cout << (var_A_int) << std::endl;
                     var_A_int = ((var_A_int)+(1));
@@ -172,7 +177,9 @@ class BasicCompilerTest(unittest.TestCase):
             #include <string>
             int main() {
                 long var_A_int = 0;
-                double var_B_float = 1;
+                double var_B_float = 0;
+                var_A_int = 0;
+                var_B_float = 1;
                 if ((((var_A_int)<(var_B_float)) ? -1 : 0)) {
                     std::cout << (std::string("A")) << std::endl;
                 } else {
@@ -192,6 +199,7 @@ class BasicCompilerTest(unittest.TestCase):
             #include <iostream>
             int main() {
                 long var_A_int = 0;
+                var_A_int = 0;
                 for (; var_A_int <= (10); var_A_int += 1) {
                     std::cout << (var_A_int) << std::endl;
                 }
@@ -209,8 +217,10 @@ class BasicCompilerTest(unittest.TestCase):
         self.assert_program_lines_equal(c_prog, '''
             #include <iostream>
             int main() {
-                long var_S_int = ((1)+(1));
                 long var_A_int = 0;
+                long var_S_int = 0;
+                var_S_int = ((1)+(1));
+                var_A_int = 0;
                 for (; var_A_int <= (10); var_A_int += (var_S_int)) {
                     std::cout << (var_A_int) << std::endl;
                 }
@@ -333,48 +343,48 @@ class BasicCompilerErrorsTest(unittest.TestCase):
             compiler.BasicCompiler(prog).compile()
 
 
-# class BasicInterpreterIntegrationTests(unittest.TestCase):
-#
-#     def test_integration(self) -> None:
-#         program_files = sorted(Path(f) for f in (Path(__file__).parent / 'integration').glob('*.bas'))
-#         self.assertGreater(len(program_files), 0, 'No integration tests found')
-#         expected_output_files = [fname.with_suffix('.expected_output.txt') for fname in program_files]
-#
-#         for program_file, expected_output_file in zip(program_files, expected_output_files):
-#             with self.subTest(file=program_file):
-#                 program = program_file.read_text()
-#                 c_code = compiler.BasicCompiler(program).compile()
-#                 with tempfile.TemporaryDirectory() as tmp:
-#                     temp_dir = Path(tmp)
-#                     c_filename = temp_dir / 'program.cc'
-#                     c_filename.write_text(c_code)
-#                     binary_filename = c_filename.with_suffix('.out')
-#
-#                     if platform.system() == 'Windows':
-#                         result = subprocess.run(
-#                             ['wsl', 'wslpath', '-a', str(c_filename).replace('\\', '\\\\')],
-#                             # check=True,
-#                             text=True,
-#                             shell=True,
-#                             capture_output=True
-#                         )
-#                         if result.returncode != 0:
-#                             raise RuntimeError(f'wslpath failed with: {result.stderr} on fname {str(c_filename)}')
-#                         c_filename_wsl = result.stdout.strip()
-#                         binary_filename_wsl = c_filename_wsl + '.out'
-#                         subprocess.run(
-#                             ['wsl', 'bash', '-c', f'g++ {c_filename_wsl} -o {binary_filename_wsl}'],
-#                             shell=True,
-#                             check=True
-#                         )
-#                         output = subprocess.run(
-#                             ['wsl', 'bash', '-c', str(binary_filename_wsl)], shell=True, check=True, capture_output=True
-#                         ).stdout.decode()
-#                     else:
-#                         subprocess.run(['g++', c_filename, '-o', binary_filename], check=True)
-#                         output = subprocess.run(binary_filename, check=True, text=True, capture_output=True).stdout
-#
-#                 self.assertEqual(output, expected_output_file.read_text())
+class BasicInterpreterIntegrationTests(unittest.TestCase):
+
+    def test_integration(self) -> None:
+        program_files = sorted(Path(f) for f in (Path(__file__).parent / 'integration').glob('*.bas'))
+        self.assertGreater(len(program_files), 0, 'No integration tests found')
+        expected_output_files = [fname.with_suffix('.expected_output.txt') for fname in program_files]
+
+        for program_file, expected_output_file in zip(program_files, expected_output_files):
+            with self.subTest(file=program_file):
+                program = program_file.read_text()
+                c_code = compiler.BasicCompiler(program).compile()
+                with tempfile.TemporaryDirectory() as tmp:
+                    temp_dir = Path(tmp)
+                    c_filename = temp_dir / 'program.cc'
+                    c_filename.write_text(c_code)
+                    binary_filename = c_filename.with_suffix('.out')
+
+                    if platform.system() == 'Windows':
+                        result = subprocess.run(
+                            ['wsl', 'wslpath', '-a', str(c_filename).replace('\\', '\\\\')],
+                            # check=True,
+                            text=True,
+                            shell=True,
+                            capture_output=True
+                        )
+                        if result.returncode != 0:
+                            raise RuntimeError(f'wslpath failed with: {result.stderr} on fname {str(c_filename)}')
+                        c_filename_wsl = result.stdout.strip()
+                        binary_filename_wsl = c_filename_wsl + '.out'
+                        subprocess.run(
+                            ['wsl', 'bash', '-c', f'g++ {c_filename_wsl} -o {binary_filename_wsl}'],
+                            shell=True,
+                            check=True
+                        )
+                        output = subprocess.run(
+                            ['wsl', 'bash', '-c', str(binary_filename_wsl)], shell=True, check=True, capture_output=True
+                        ).stdout.decode()
+                    else:
+                        subprocess.run(['g++', c_filename, '-o', binary_filename], check=True)
+                        output = subprocess.run(binary_filename, check=True, text=True, capture_output=True).stdout
+
+                self.assertEqual(output, expected_output_file.read_text())
 
 
 if __name__ == '__main__':
