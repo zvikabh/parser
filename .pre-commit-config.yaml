@@ -11,10 +11,7 @@ repos:
     hooks:
       - id: mypy
         name: mypy
-        entry: mypy
-        language: python
-        types: [python]
-        additional_dependencies:
-          - mypy
-          - parameterized
-        args: ["--config-file=pyproject.toml"]
+        entry: python -m mypy
+        language: system
+        pass_filenames: false
+        args: ["--config-file=pyproject.toml", "."]
